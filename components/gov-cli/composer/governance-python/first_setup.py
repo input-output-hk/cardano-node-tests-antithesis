@@ -103,6 +103,29 @@ def main() -> int:
         pass
     sdk.sometimes(dreps >= 1, "dreps_registered_after_setup")
 
+    # Generate and fund a pool of payment addresses for the parallel drivers.
+    pool_dir = g.PAYMENT_POOL
+    pool_dir.mkdir(parents=True, exist_ok=True)
+    pool_txouts = []
+    for i in range(g.NUM_PAYMENT_ADDRS):
+        keys = cluster.g_address.gen_payment_key_pair(
+            key_name=f"addr_{i}",
+            destination_dir=str(pool_dir),
+        )
+        addr = cluster.g_address.build_payment_address(
+            payment_vkey_file=keys.vkey_file,
+        )
+        (pool_dir / f"addr_{i}.addr").write_text(addr + "\n")
+        pool_txouts.append(clusterlib.TxOut(address=addr, amount=g.PAYMENT_ADDR_FUND))
+    try:
+        g.build_sign_submit(cluster, "fund_payment_pool", txouts=pool_txouts)
+        sdk.sometimes(True, "payment_pool_funded")
+        print(f"payment pool funded ({g.NUM_PAYMENT_ADDRS} addresses)", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001
+        print(f"payment pool funding failed: {exc}", file=sys.stderr)
+        sdk.unreachable("payment_pool_funding_failed")
+        return 1
+
     g.SETUP_MARKER.touch()
     sdk.sometimes(True, "governance_setup_complete")
     print(f"setup complete (cc_active={cc_active} dreps={dreps})", file=sys.stderr)

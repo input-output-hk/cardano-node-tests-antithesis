@@ -34,6 +34,9 @@ GD = GOV / "governance_data"
 STATE_DIR = GOV / "state"
 SETUP_MARKER = STATE_DIR / "setup_done"
 FAUCET_LOCK = STATE_DIR / "faucet.lock"
+PAYMENT_POOL = GOV / "payment_pool"
+NUM_PAYMENT_ADDRS = int(os.environ.get("NUM_PAYMENT_ADDRS", "20"))
+PAYMENT_ADDR_FUND = int(os.environ.get("PAYMENT_ADDR_FUND", "10000000000"))  # 10k ADA
 
 # Perturbation-witness state. The anytime_chain_progress probe writes a
 # verdict here ("stalled <epoch>" / "producing <epoch>") each time it
@@ -121,6 +124,42 @@ def faucet_lock(timeout: int = 120):
         fh.close()
 
 
+def try_acquire_payment_addr(idx: int):
+    """Non-blocking lock on pool address idx.
+    Returns (AddressRecord, lock_fh) on success, (None, None) if in use or missing."""
+    addr_path = PAYMENT_POOL / f"addr_{idx}.addr"
+    vkey_path = PAYMENT_POOL / f"addr_{idx}.vkey"
+    skey_path = PAYMENT_POOL / f"addr_{idx}.skey"
+    lock_path = PAYMENT_POOL / f"addr_{idx}.lock"
+
+    if not addr_path.exists():
+        return None, None
+
+    fh = lock_path.open("w")
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        return None, None
+
+    rec = clusterlib.AddressRecord(
+        address=addr_path.read_text().strip(),
+        vkey_file=vkey_path,
+        skey_file=skey_path,
+    )
+    return rec, fh
+
+
+def release_payment_addr(fh) -> None:
+    if fh is None:
+        return
+    try:
+        fcntl.flock(fh, fcntl.LOCK_UN)
+        fh.close()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def build_sign_submit(
     cluster: clusterlib.ClusterLib,
     name: str,
@@ -130,13 +169,16 @@ def build_sign_submit(
     vote_files=(),
     signing_key_files=(),
     txouts=(),
+    src_addr: clusterlib.AddressRecord | None = None,
 ) -> str:
-    """Build (auto-selecting faucet inputs), sign, submit. Returns txid.
+    """Build, sign, submit. Returns txid.
 
-    The faucet skey is always added to the witnesses; inputs and change
-    go to the faucet address. Serialized on the faucet lock.
+    If src_addr is provided it is used as the source/change address (caller
+    holds the per-address lock). Otherwise the shared faucet is used and
+    serialized on the faucet lock.
     """
-    fa = faucet()
+    fa = src_addr if src_addr is not None else faucet()
+    lock_ctx = contextlib.nullcontext() if src_addr is not None else faucet_lock()
     all_signing = [*signing_key_files, fa.skey_file]
     tx_files = clusterlib.TxFiles(
         certificate_files=certificate_files,
@@ -144,7 +186,7 @@ def build_sign_submit(
         vote_files=vote_files,
         signing_key_files=all_signing,
     )
-    with faucet_lock():
+    with lock_ctx:
         out = cluster.g_transaction.build_tx(
             src_address=fa.address,
             tx_name=name,

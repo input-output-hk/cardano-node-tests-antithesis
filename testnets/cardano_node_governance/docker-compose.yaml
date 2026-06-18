@@ -154,6 +154,7 @@ services:
       NUM_DREPS: "5"
       NUM_CC: "5"
       NUM_POOLS: "3"
+      NUM_PAYMENT_ADDRS: "20"
     volumes:
       - relay1-state:/state:ro
       - gov-data:/gov-data

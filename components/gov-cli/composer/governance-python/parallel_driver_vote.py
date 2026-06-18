@@ -53,104 +53,100 @@ def main() -> int:
     if not g.SETUP_MARKER.exists():
         return 0
 
-    cluster = g.make_cluster()
-    if not g.wait_for_node(cluster, tries=30):
-        sdk.unreachable("vote_node_not_ready")
-        return 0
-
-    # Pull the live InfoAction set from gov-state and RNG-select one. The
-    # set is stateless and self-healing: an action only leaves it when the
-    # ledger expires/enacts it, never on a transient local failure.
-    props = g.live_info_actions(cluster)
-    sdk.sometimes(len(props) >= 1, "actions_live", {"live": len(props)})
-    if not props:
-        print("no live actions in gov-state", file=sys.stderr)
-        return 0
-
-    pick = props[g.rng_mod(len(props))]
-    txid = pick["actionId"]["txId"]
-    ix = pick["actionId"]["govActionIx"]
-
-    voters = build_voters()
-    if not voters:
-        return 0
-
-    kind, create_name, vkey_kw, vkey_file, skey_file = voters[g.rng_mod(len(voters))]
-
-    # RNG-select the decision: yes, no or abstain.
-    decisions = [
-        (clusterlib.Votes.YES, "yes"),
-        (clusterlib.Votes.NO, "no"),
-        (clusterlib.Votes.ABSTAIN, "abstain"),
-    ]
-    vote_enum, decision = decisions[g.rng_mod(3)]
-
-    tok = f"{int(time.time())}_{os.getpid()}_{time.time_ns() % 100000}"
-    print(f"voting {decision} as {kind} on {txid}#{ix}", file=sys.stderr)
-
-    create_fn = getattr(cluster.g_governance.vote, create_name)
-    vote = create_fn(
-        vote_name=f"{kind}_{tok}",
-        action_txid=txid,
-        action_ix=ix,
-        vote=vote_enum,
-        destination_dir=str(g.WORK),
-        **{vkey_kw: vkey_file},
-    )
+    idx = g.rng_mod(g.NUM_PAYMENT_ADDRS)
+    addr, lock_fh = g.try_acquire_payment_addr(idx)
+    if addr is None:
+        return 0  # in use, antithesis retries next tick
 
     try:
-        g.build_sign_submit(
-            cluster,
-            f"vote_{tok}",
-            vote_files=[vote.vote_file],
-            signing_key_files=[skey_file],
+        cluster = g.make_cluster()
+        if not g.wait_for_node(cluster, tries=30):
+            sdk.unreachable("vote_node_not_ready")
+            return 0
+
+        # Pull the live InfoAction set from gov-state and RNG-select one.
+        props = g.live_info_actions(cluster)
+        sdk.sometimes(len(props) >= 1, "actions_live", {"live": len(props)})
+        if not props:
+            print("no live actions in gov-state", file=sys.stderr)
+            return 0
+
+        pick = props[g.rng_mod(len(props))]
+        txid = pick["actionId"]["txId"]
+        ix = pick["actionId"]["govActionIx"]
+
+        voters = build_voters()
+        if not voters:
+            return 0
+
+        kind, create_name, vkey_kw, vkey_file, skey_file = voters[g.rng_mod(len(voters))]
+
+        decisions = [
+            (clusterlib.Votes.YES, "yes"),
+            (clusterlib.Votes.NO, "no"),
+            (clusterlib.Votes.ABSTAIN, "abstain"),
+        ]
+        vote_enum, decision = decisions[g.rng_mod(3)]
+
+        tok = f"{int(time.time())}_{os.getpid()}_{time.time_ns() % 100000}"
+        print(f"voting {decision} as {kind} on {txid}#{ix}", file=sys.stderr)
+
+        create_fn = getattr(cluster.g_governance.vote, create_name)
+        vote = create_fn(
+            vote_name=f"{kind}_{tok}",
+            action_txid=txid,
+            action_ix=ix,
+            vote=vote_enum,
+            destination_dir=str(g.WORK),
+            **{vkey_kw: vkey_file},
         )
-    except Exception as exc:  # noqa: BLE001
-        # Transient failure (faucet-lock timeout / stalled submit). The
-        # action is still in gov-state, so we do NOT retire it — a later
-        # tick simply picks it again. Self-healing by construction; just
-        # record coverage.
-        print(f"vote submit failed transiently for {txid}: {exc} (will retry)", file=sys.stderr)
-        sdk.sometimes(True, "vote_transient_failure", {"op": "vote", "voter": kind})
+
+        try:
+            g.build_sign_submit(
+                cluster,
+                f"vote_{tok}",
+                vote_files=[vote.vote_file],
+                signing_key_files=[skey_file],
+                src_addr=addr,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"vote submit failed transiently for {txid}: {exc} (will retry)", file=sys.stderr)
+            sdk.sometimes(True, "vote_transient_failure", {"op": "vote", "voter": kind})
+            return 0
+        sdk.reachable("vote_submitted")
+
+        drep_n = spo_n = cc_n = 0
+        try:
+            prop = g.lookup_proposal(cluster.g_query.get_gov_state(), txid) or {}
+            drep_n = len(prop.get("dRepVotes") or {})
+            spo_n = len(prop.get("stakePoolVotes") or {})
+            cc_n = len(prop.get("committeeVotes") or {})
+        except Exception:  # noqa: BLE001
+            pass
+        total = drep_n + spo_n + cc_n
+        majority = (g.NUM_DREPS + g.NUM_POOLS + g.NUM_CC + 1) // 2
+
+        sdk.sometimes(total >= 1, f"vote_recorded_{kind}")
+        sdk.sometimes(True, f"vote_decision_{decision}")
+
+        all_roles = drep_n >= 1 and spo_n >= 1 and cc_n >= 1
+        sdk.sometimes(
+            all_roles, "action_voted_by_all_roles", {"drep": drep_n, "spo": spo_n, "cc": cc_n}
+        )
+        sdk.sometimes(
+            total >= majority, "action_majority_reached", {"total": total, "majority": majority}
+        )
+
+        if g.recent_stall(90):
+            sdk.sometimes(True, "gov_op_under_perturbation", {"op": "vote", "voter": kind})
+
+        print(
+            f"vote submitted ({kind} {decision}; action now has {total} votes)",
+            file=sys.stderr,
+        )
         return 0
-    sdk.reachable("vote_submitted")
-
-    # Coverage from the on-chain vote breakdown after this vote landed.
-    drep_n = spo_n = cc_n = 0
-    try:
-        prop = g.lookup_proposal(cluster.g_query.get_gov_state(), txid) or {}
-        drep_n = len(prop.get("dRepVotes") or {})
-        spo_n = len(prop.get("stakePoolVotes") or {})
-        cc_n = len(prop.get("committeeVotes") or {})
-    except Exception:  # noqa: BLE001
-        pass
-    total = drep_n + spo_n + cc_n
-    majority = (g.NUM_DREPS + g.NUM_POOLS + g.NUM_CC + 1) // 2
-
-    # This vote was cast by $kind/$decision; per-role + per-decision coverage.
-    sdk.sometimes(total >= 1, f"vote_recorded_{kind}")
-    sdk.sometimes(True, f"vote_decision_{decision}")
-
-    # Quorum-distribution coverage: an action voted by all three roles, and
-    # one that crossed a majority of all eligible voters.
-    all_roles = drep_n >= 1 and spo_n >= 1 and cc_n >= 1
-    sdk.sometimes(
-        all_roles, "action_voted_by_all_roles", {"drep": drep_n, "spo": spo_n, "cc": cc_n}
-    )
-    sdk.sometimes(
-        total >= majority, "action_majority_reached", {"total": total, "majority": majority}
-    )
-
-    # Perturbation coverage: this vote landed while the chain was recently
-    # stalled by faults (block production halted, yet governance progressed).
-    if g.recent_stall(90):
-        sdk.sometimes(True, "gov_op_under_perturbation", {"op": "vote", "voter": kind})
-
-    print(
-        f"vote submitted ({kind} {decision}; action now has {total} votes)",
-        file=sys.stderr,
-    )
-    return 0
+    finally:
+        g.release_payment_addr(lock_fh)
 
 
 if __name__ == "__main__":
