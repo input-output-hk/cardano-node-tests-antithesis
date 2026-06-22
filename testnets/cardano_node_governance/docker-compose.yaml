@@ -43,9 +43,7 @@ x-cardano-node: &cardano-node
 services:
   # One-shot: cardonnay genesis + governance assets -> volumes.
   gov-configurator:
-    build:
-      context: ../../components/gov-configurator
-      dockerfile: Dockerfile
+    image: ghcr.io/saratomaz/cardano-node-tests-antithesis/gov-configurator@sha256:ed8792538c9624d48e8bde92677e9c3e93fe03617885107b32250462367d0e19
     container_name: gov-configurator
     environment:
       NUM_POOLS: "3"
@@ -136,11 +134,7 @@ services:
   # Sleeping cardano-cli container holding the governance composer
   # drivers. Built with DRIVER_LANG=python.
   gov-cli:
-    build:
-      context: ../../components/gov-cli
-      dockerfile: Dockerfile
-      args:
-        DRIVER_LANG: python
+    image: ghcr.io/saratomaz/cardano-node-tests-antithesis/gov-cli@sha256:5c7d7b3179702bdd61cce7fcda40943b52958fd59737e385cc8cf7b3bf351f7d
     container_name: gov-cli
     hostname: gov-cli.example
     labels:
