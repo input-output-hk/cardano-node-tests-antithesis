@@ -8,12 +8,10 @@
 #              library) driving the same flow (composer/governance-python)
 # Pick one at build time:  --build-arg DRIVER_LANG=bash|python
 
-# cardano-cli pinned to the producer node version (11.0.1).
-FROM ghcr.io/intersectmbo/cardano-node@sha256:007da778998d0bdb043fb834c62b9da1c95e33610f31f6f9cccab29a945e2b99 AS cardano-bin
-
 FROM debian:bookworm-slim
 
 ARG DRIVER_LANG=bash
+ARG NODE_VERSION=11.0.1
 
 ENV TZ=UTC
 RUN ln -snf /usr/share/zoneinfo/${TZ} /etc/localtime && echo ${TZ} > /etc/timezone
@@ -21,14 +19,19 @@ RUN ln -snf /usr/share/zoneinfo/${TZ} /etc/localtime && echo ${TZ} > /etc/timezo
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
+        curl \
         jq \
         python3 \
         python3-pip && \
     rm -rf /var/lib/apt/lists/*
 
-# Nix store (glibc + cardano binary deps) and the pinned binaries.
-COPY --from=cardano-bin /nix /nix
-COPY --from=cardano-bin /usr/local/bin/cardano-cli /usr/local/bin/cardano-cli
+# Download cardano-cli from the official GitHub release.
+RUN curl -fsSL \
+    "https://github.com/IntersectMBO/cardano-node/releases/download/${NODE_VERSION}/cardano-node-${NODE_VERSION}-linux-amd64.tar.gz" \
+    -o /tmp/cardano.tar.gz && \
+    tar -xzf /tmp/cardano.tar.gz -C /tmp && \
+    install -m 0755 /tmp/bin/cardano-cli /usr/local/bin/cardano-cli && \
+    rm -rf /tmp/cardano.tar.gz /tmp/bin
 
 # Standalone cardano-cli wrapper library used by the python drivers.
 RUN python3 -m pip install --no-cache-dir --break-system-packages cardano-clusterlib
