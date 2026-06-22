@@ -112,8 +112,10 @@ def main() -> int:
             key_name=f"addr_{i}",
             destination_dir=str(pool_dir),
         )
-        addr = cluster.g_address.build_payment_address(
+        addr = cluster.g_address.gen_payment_addr(
+            addr_name=f"addr_{i}",
             payment_vkey_file=keys.vkey_file,
+            destination_dir=str(pool_dir),
         )
         (pool_dir / f"addr_{i}.addr").write_text(addr + "\n")
         pool_txouts.append(clusterlib.TxOut(address=addr, amount=g.PAYMENT_ADDR_FUND))

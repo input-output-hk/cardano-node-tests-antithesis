@@ -44,7 +44,7 @@ PAYMENT_ADDR_FUND = int(os.environ.get("PAYMENT_ADDR_FUND", "10000000000"))  # 1
 # that a governance op landed while the chain was degraded.
 CHAIN_VERDICT = STATE_DIR / "chain_verdict"
 
-ANCHOR_URL = "https://example.com/governance.json"
+ANCHOR_URL = "http://localhost:8080/governance.json"
 ANCHOR_TEXT = '{"body":{"title":"antithesis governance workload"}}'
 
 
