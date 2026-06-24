@@ -27,6 +27,7 @@ def main() -> int:
 
     if g.SETUP_MARKER.exists():
         sdk.sometimes(True, "governance_setup_already_done")
+        sdk.setup_complete()
         return 0
 
     cluster = g.make_cluster()
@@ -130,6 +131,7 @@ def main() -> int:
 
     g.SETUP_MARKER.touch()
     sdk.sometimes(True, "governance_setup_complete")
+    sdk.setup_complete()
     print(f"setup complete (cc_active={cc_active} dreps={dreps})", file=sys.stderr)
     return 0
 
