@@ -41,8 +41,14 @@ RUN python3 -m pip install --no-cache-dir --break-system-packages cardano-cluste
 COPY composer /opt/gov-drivers/
 RUN mkdir -p /opt/antithesis/test/v1 && \
     cp -r "/opt/gov-drivers/governance-${DRIVER_LANG}" /opt/antithesis/test/v1/governance && \
-    chmod 0755 /opt/antithesis/test/v1/governance/* && \
-    find /opt/gov-drivers -type f -exec chmod 0755 {} +
+    chmod 0644 /opt/antithesis/test/v1/governance/* && \
+    chmod 0755 /opt/antithesis/test/v1/governance/first_* \
+               /opt/antithesis/test/v1/governance/parallel_* \
+               /opt/antithesis/test/v1/governance/anytime_* \
+               /opt/antithesis/test/v1/governance/eventually_* \
+               /opt/antithesis/test/v1/governance/finally_* && \
+    find /opt/gov-drivers -type f -exec chmod 0644 {} + && \
+    find /opt/gov-drivers -name 'first_*' -o -name 'parallel_*' -o -name 'anytime_*' -o -name 'eventually_*' -o -name 'finally_*' | xargs chmod 0755
 
 COPY sleep.sh /sleep.sh
 RUN chmod 0755 /sleep.sh
