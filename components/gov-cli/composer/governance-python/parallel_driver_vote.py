@@ -140,7 +140,6 @@ def main() -> int:
         if g.recent_stall(90):
             sdk.sometimes(True, "gov_op_under_perturbation", {"op": "vote", "voter": kind})
 
-        sdk.always(True, "vote_exits_zero")
         print(
             f"vote submitted ({kind} {decision}; action now has {total} votes)",
             file=sys.stderr,
@@ -152,7 +151,9 @@ def main() -> int:
 
 if __name__ == "__main__":
     try:
-        sys.exit(main())
+        rc = main()
+        sdk.always(rc == 0, "vote_exits_zero")
+        sys.exit(rc)
     except Exception as exc:  # noqa: BLE001
         print(f"vote aborted: {exc}", file=sys.stderr)
         sdk.unreachable("vote_aborted")

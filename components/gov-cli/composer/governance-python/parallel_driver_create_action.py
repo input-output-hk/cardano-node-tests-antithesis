@@ -64,7 +64,6 @@ def main() -> int:
 
         if g.recent_stall(90):
             sdk.sometimes(True, "gov_op_under_perturbation", {"op": "create"})
-        sdk.always(True, "create_action_exits_zero")
         return 0
     finally:
         g.release_payment_addr(lock_fh)
@@ -72,7 +71,9 @@ def main() -> int:
 
 if __name__ == "__main__":
     try:
-        sys.exit(main())
+        rc = main()
+        sdk.always(rc == 0, "create_action_exits_zero")
+        sys.exit(rc)
     except Exception as exc:  # noqa: BLE001
         print(f"create_action aborted: {exc}", file=sys.stderr)
         sdk.unreachable("create_action_aborted")

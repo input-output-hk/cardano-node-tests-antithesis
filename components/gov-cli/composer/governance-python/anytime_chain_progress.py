@@ -61,13 +61,14 @@ def main() -> int:
 
     # relay1 is excluded from faults, so it must keep answering tip queries.
     sdk.always(True, "relay_reachable_under_fault")
-    sdk.always(True, "chain_progress_exits_zero")
     return 0
 
 
 if __name__ == "__main__":
     try:
-        sys.exit(main())
+        rc = main()
+        sdk.always(rc == 0, "chain_progress_exits_zero")
+        sys.exit(rc)
     except Exception as exc:  # noqa: BLE001
         print(f"chain_progress aborted: {exc}", file=sys.stderr)
         sdk.unreachable("chain_progress_aborted")
