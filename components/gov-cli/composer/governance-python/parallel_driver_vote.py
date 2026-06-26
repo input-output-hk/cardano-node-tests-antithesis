@@ -140,6 +140,7 @@ def main() -> int:
         if g.recent_stall(90):
             sdk.sometimes(True, "gov_op_under_perturbation", {"op": "vote", "voter": kind})
 
+        sdk.always(True, "vote_exits_zero")
         print(
             f"vote submitted ({kind} {decision}; action now has {total} votes)",
             file=sys.stderr,

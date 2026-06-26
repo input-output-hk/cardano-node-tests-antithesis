@@ -64,6 +64,7 @@ def main() -> int:
 
         if g.recent_stall(90):
             sdk.sometimes(True, "gov_op_under_perturbation", {"op": "create"})
+        sdk.always(True, "create_action_exits_zero")
         return 0
     finally:
         g.release_payment_addr(lock_fh)

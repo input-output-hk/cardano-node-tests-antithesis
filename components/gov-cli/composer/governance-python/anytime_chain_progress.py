@@ -61,6 +61,7 @@ def main() -> int:
 
     # relay1 is excluded from faults, so it must keep answering tip queries.
     sdk.always(True, "relay_reachable_under_fault")
+    sdk.always(True, "chain_progress_exits_zero")
     return 0
 
 
