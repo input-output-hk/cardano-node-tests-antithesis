@@ -62,7 +62,9 @@ def main() -> int:
 
 if __name__ == "__main__":
     try:
-        sys.exit(main())
+        rc = main()
+        sdk.always(rc == 0, "govstate_invariant_exits_zero")
+        sys.exit(rc)
     except Exception as exc:  # noqa: BLE001
         print(f"govstate_invariant aborted: {exc}", file=sys.stderr)
         sdk.unreachable("govstate_invariant_aborted")
