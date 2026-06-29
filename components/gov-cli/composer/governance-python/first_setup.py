@@ -87,11 +87,9 @@ def main() -> int:
     cc_active = 0
     try:
         cc_state = cluster.g_query.get_committee_state()
-        members = (cc_state.get("committee") or cc_state.get("commitee") or {}).get("members", {})
+        members = (cc_state or {}).get("committee", {}) or {}
         cc_active = sum(
-            1
-            for m in members.values()
-            if m.get("hotCredsAuthStatus", {}).get("tag") == "MemberAuthorized"
+            1 for m in members.values() if (m or {}).get("status") == "Active"
         )
     except Exception:  # noqa: BLE001
         pass
