@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import os
 import sys
-import time
 
 import helper_gov as g
 import helper_sdk as sdk
@@ -37,7 +36,7 @@ def main() -> int:
             sdk.unreachable("create_action_node_not_ready")
             return 0
 
-        tok = f"{int(time.time())}_{os.getpid()}_{time.time_ns() % 100000}"
+        tok = f"{g.antithesis_rng()}_{os.getpid()}"
         deposit = cluster.g_query.get_gov_action_deposit()
         anchor_hash = cluster.g_governance.get_anchor_data_hash(text=g.ANCHOR_TEXT)
 
@@ -62,7 +61,7 @@ def main() -> int:
         print(f"info action created: {txid}", file=sys.stderr)
         sdk.sometimes(True, "info_action_created")
 
-        if g.recent_stall(90):
+        if g.recent_stall(cluster):
             sdk.sometimes(True, "gov_op_under_perturbation", {"op": "create"})
         return 0
     finally:

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import os
 import sys
-import time
 
 import helper_gov as g
 import helper_sdk as sdk
@@ -88,7 +87,7 @@ def main() -> int:
         ]
         vote_enum, decision = decisions[g.rng_mod(3)]
 
-        tok = f"{int(time.time())}_{os.getpid()}_{time.time_ns() % 100000}"
+        tok = f"{g.antithesis_rng()}_{os.getpid()}"
         print(f"voting {decision} as {kind} on {txid}#{ix}", file=sys.stderr)
 
         create_fn = getattr(cluster.g_governance.vote, create_name)
@@ -137,7 +136,7 @@ def main() -> int:
             total >= majority, "action_majority_reached", {"total": total, "majority": majority}
         )
 
-        if g.recent_stall(90):
+        if g.recent_stall(cluster):
             sdk.sometimes(True, "gov_op_under_perturbation", {"op": "vote", "voter": kind})
 
         print(

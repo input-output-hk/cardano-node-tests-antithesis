@@ -53,10 +53,10 @@ def main() -> int:
 
     ds = s2 - s1
     if ds <= 0:
-        g.set_chain_verdict("stalled")
+        g.set_chain_verdict("stalled", s2)
         sdk.sometimes(True, "chain_stalled_under_fault", {"window_s": WINDOW, "slot": s2})
     else:
-        g.set_chain_verdict("producing")
+        g.set_chain_verdict("producing", s2)
         sdk.sometimes(True, "chain_producing", {"blocks": ds, "window_s": WINDOW})
 
     # relay1 is excluded from faults, so it must keep answering tip queries.

@@ -105,10 +105,9 @@ def faucet_lock(timeout: int = 120):
     otherwise select the same UTxO and conflict."""
     ensure_dirs()
     fh = FAUCET_LOCK.open("w")
-    deadline = time.time() + timeout
     locked = False
     try:
-        while time.time() < deadline:
+        for _ in range(timeout):
             try:
                 fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 locked = True
@@ -273,18 +272,21 @@ def rng_mod(n: int) -> int:
 # --- Perturbation witness (mirrors helper_gov.sh) --------------------
 
 
-def set_chain_verdict(kind: str) -> None:
-    """Publish the latest chain-progress verdict: "<kind> <epoch>"."""
+def set_chain_verdict(kind: str, slot: int = 0) -> None:
+    """Publish the latest chain-progress verdict: "<kind> <slot>"."""
     ensure_dirs()
     try:
-        CHAIN_VERDICT.write_text(f"{kind} {int(time.time())}\n", encoding="utf-8")
+        CHAIN_VERDICT.write_text(f"{kind} {slot}\n", encoding="utf-8")
     except Exception:  # noqa: BLE001
         pass
 
 
-def recent_stall(within: int = 90) -> bool:
-    """True if the most recent chain sample was a stall within the window
-    (i.e. faults were actively halting block production around now)."""
+def recent_stall(cluster: "clusterlib.ClusterLib | None" = None, within_slots: int = 450) -> bool:
+    """True if the most recent chain sample was a stall within within_slots slots.
+
+    450 slots ≈ 90 seconds at 0.2 s/slot. Uses slot numbers (virtual time)
+    rather than wall-clock time so behaviour is deterministic under Antithesis.
+    """
     if not CHAIN_VERDICT.exists():
         return False
     try:
@@ -294,7 +296,12 @@ def recent_stall(within: int = 90) -> bool:
     if len(parts) < 2 or parts[0] != "stalled":
         return False
     try:
-        ts = int(parts[1])
+        stall_slot = int(parts[1])
     except ValueError:
         return False
-    return (int(time.time()) - ts) <= within
+    if stall_slot == 0 or cluster is None:
+        return True
+    try:
+        return (cluster.g_query.get_slot_no() - stall_slot) <= within_slots
+    except Exception:  # noqa: BLE001
+        return True
