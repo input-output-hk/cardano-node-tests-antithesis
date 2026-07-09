@@ -43,7 +43,7 @@ def main() -> int:
             pass
 
     # Invariant: the always-abstain / always-no-confidence vote-stake
-    # delegations set up by first_setup_special_dreps.py must never drift
+    # delegations set up by first_setup.py must never drift
     # once on-chain — unlike a DRep delegation there's no key to re-submit
     # a certificate with under fault injection, so any loss would be a
     # ledger bug, not a driver retry opportunity.

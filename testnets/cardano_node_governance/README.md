@@ -37,15 +37,14 @@ Each logical cardano-cli operation is a separate composer driver
 (`components/gov-cli/composer/governance-{bash,python}/`):
 
 1. `first_setup` — submits the CC hot-key authorizations, DRep
-   registrations and vote-stake delegations, then waits one epoch.
-2. `first_setup_special_dreps` — delegates two freshly generated
-   vote-stake addresses to the always-abstain / always-no-confidence
-   targets (auto-counted by the ledger, no vote tx needed), after
-   `first_setup` completes.
-3. `parallel_driver_create_action` — submits an InfoAction.
-4. `parallel_driver_vote` — casts DRep + SPO + CC votes on a pending
+   registrations and vote-stake delegations, waits one epoch, and also
+   delegates two freshly generated vote-stake addresses to the
+   always-abstain / always-no-confidence targets (auto-counted by the
+   ledger, no vote tx needed).
+2. `parallel_driver_create_action` — submits an InfoAction.
+3. `parallel_driver_vote` — casts DRep + SPO + CC votes on a pending
    action.
-5. `anytime_` / `eventually_` / `finally_` validators.
+4. `anytime_` / `eventually_` / `finally_` validators.
 
 InfoActions never enact, so the create/vote workload is unbounded and
 chain state never drifts — ideal under continuous fault injection.
