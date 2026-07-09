@@ -127,6 +127,7 @@ def main() -> int:
 
         sdk.sometimes(total >= 1, f"vote_recorded_{kind}")
         sdk.sometimes(True, f"vote_decision_{decision}")
+        sdk.sometimes(True, f"vote_decision_{decision}_by_{kind}", {"voter": kind, "decision": decision})
 
         all_roles = drep_n >= 1 and spo_n >= 1 and cc_n >= 1
         sdk.sometimes(
