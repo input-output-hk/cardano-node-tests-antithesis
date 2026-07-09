@@ -42,6 +42,30 @@ def main() -> int:
         except Exception:  # noqa: BLE001
             pass
 
+    # Invariant: the always-abstain / always-no-confidence vote-stake
+    # delegations set up by first_setup_special_dreps.py must never drift
+    # once on-chain — unlike a DRep delegation there's no key to re-submit
+    # a certificate with under fault injection, so any loss would be a
+    # ledger bug, not a driver retry opportunity.
+    if g.SPECIAL_DREPS_MARKER.exists():
+        for name, expected in (
+            ("always_abstain", "alwaysAbstain"),
+            ("always_no_confidence", "alwaysNoConfidence"),
+        ):
+            addr_file = g.SPECIAL_DREPS_DIR / f"special_{name}.addr"
+            if not addr_file.exists():
+                continue
+            try:
+                addr = addr_file.read_text().strip()
+                info = cluster.g_query.get_stake_addr_info(addr)
+                sdk.always(
+                    info.vote_delegation == expected,
+                    f"special_drep_{name}_delegation_stable",
+                    {"vote_delegation": info.vote_delegation},
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
     # Lifecycle coverage (stateless, derived from gov-state): an action is
     # in its final epoch of life when expiresAfter == the current epoch.
     # Seeing this green proves the run lasted long enough for actions to
