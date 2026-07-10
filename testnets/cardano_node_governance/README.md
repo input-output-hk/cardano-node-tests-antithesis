@@ -6,16 +6,16 @@ Conway **governance** workload under Antithesis fault injection.
 
 | Service | Role | Faults | Notes |
 |---|---|---|---|
-| `p1`..`p5` | block producers | **injected** | cardano-node 11.0.1 |
+| `p1`, `p2`, `p3` | block producers | **injected** | cardano-node 11.0.1 |
 | `relay1` | relay | excluded | stable query/submit endpoint |
 | `gov-cli` | cardano-cli driver host | excluded | sleeps; Antithesis execs the governance drivers |
 | `gov-configurator` | one-shot init | n/a | cardonnay genesis + governance assets |
 | `tracer`, `tracer-sidecar`, `log-tailer`, `sidecar` | support | excluded | reused from master |
 
-Five block producers run under fault injection, so a majority (3)
-survives even if faults knock out 2 simultaneously; the single relay is
-kept out of faults so the governance drivers always have a reachable
-node.
+Three block producers run under fault injection, so a network
+partition leaves a 2-vs-1 majority to anchor the canonical chain; the
+single relay is kept out of faults so the governance drivers always
+have a reachable node.
 
 ## Genesis + assets (cardonnay)
 
@@ -64,7 +64,7 @@ order:
 1. `docker compose build` (builds gov-configurator + gov-cli).
 2. `docker compose up gov-configurator` — confirm genesis +
    `governance_data` land in the volumes.
-3. `docker compose up p1 p2 p3 p4 p5 relay1` — **confirm pool-only liveness**
+3. `docker compose up p1 p2 p3 relay1` — **confirm pool-only liveness**
    (the chain produces blocks with no BFT node; `cardano-cli query tip`
    advances). This is the #1 assumption to verify. Fallback if it
    stalls: add a genesis-delegate (BFT) producer.

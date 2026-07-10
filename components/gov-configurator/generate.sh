@@ -24,14 +24,18 @@ trap 'echo "generate.sh failed at line $LINENO" >&2' ERR
 NUM_POOLS="${NUM_POOLS:-3}"
 # securityParam (k) and epochLength (slots). cardonnay's conway_fast
 # defaults to k=10 / epochLength=1000 (k = 10·k/f with f=0.1), which is
-# far too small for an Antithesis testnet: under network-partition faults
-# a producer minority builds >k blocks during a multi-minute split, so
-# the chain reorgs deeper than k. Raise k (3 producers give a 2-vs-1
-# majority so only the minority reorgs; k must cover its block production
-# over the longest split) and keep cardonnay's epochLength = 10·k/f
-# ratio for nonce stability.
-SECURITY_PARAM="${SECURITY_PARAM:-50}"
-EPOCH_LENGTH="${EPOCH_LENGTH:-5000}"
+# far too small for an Antithesis testnet: under fault injection a
+# producer minority (or one recovering from a restart) can build/miss
+# more than k blocks before reconciling, so the chain reorgs deeper
+# than k ("cluster fork depth < k" in the Antithesis report). Observed
+# producer restart cadence is ~60-150s; at this genesis's
+# activeSlotsCoeff=0.1 (slotLength 0.2s => ~0.5 blocks/s network-wide),
+# a 150s outage alone produces ~75 blocks elsewhere, so k=50 had
+# essentially no margin. Raise k with real headroom over that (3
+# producers give a 2-vs-1 majority so only the minority reorgs) and
+# keep cardonnay's epochLength = 10·k/f ratio for nonce stability.
+SECURITY_PARAM="${SECURITY_PARAM:-150}"
+EPOCH_LENGTH="${EPOCH_LENGTH:-15000}"
 GEN_ROOT=/work/cdny
 
 # Generate once per volume lifetime. Every `docker compose up` starts
