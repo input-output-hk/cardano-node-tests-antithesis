@@ -57,7 +57,11 @@ cd /tmp   # cardonnay refuses to run from inside the state dir
 
 # ---------------------------------------------------------------------
 # 1. Materialize the conway_fast scripts (generate-only = no nodes).
-#    -s minimum is 3; we override NUM_POOLS in the materialized script.
+#    -s must match NUM_POOLS: cardonnay bakes one config-pool<i>.json
+#    template per -s at materialization time, so passing a smaller
+#    fixed value here (leaving the later NUM_POOLS sed patch to raise
+#    it) starves the per-node config loop below of templates for the
+#    extra pools. -s has its own floor of 3.
 #
 #    cardonnay's CLI calls os.getlogin() to build its default workdir,
 #    which throws in a container with no controlling terminal. Invoke
@@ -65,12 +69,14 @@ cd /tmp   # cardonnay refuses to run from inside the state dir
 #    stable public CLI.
 # ---------------------------------------------------------------------
 export GEN_ROOT
-GEN_ROOT="$GEN_ROOT" python3 - <<'PY'
+CARDONNAY_NUM_POOLS="$((NUM_POOLS < 3 ? 3 : NUM_POOLS))"
+CARDONNAY_NUM_POOLS="$CARDONNAY_NUM_POOLS" GEN_ROOT="$GEN_ROOT" python3 - <<'PY'
 import os, sys
 os.getlogin = lambda: os.environ.get("USER") or "root"
 from cardonnay.main import main
 sys.argv = ["cardonnay", "create", "-t", "conway_fast",
-            "-g", "-i", "0", "-s", "3", "--work-dir", os.environ["GEN_ROOT"]]
+            "-g", "-i", "0", "-s", os.environ["CARDONNAY_NUM_POOLS"],
+            "--work-dir", os.environ["GEN_ROOT"]]
 try:
     main()
 except SystemExit as exc:
