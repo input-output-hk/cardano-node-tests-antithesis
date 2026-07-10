@@ -2,10 +2,11 @@
 # injection.
 #
 # Topology:
-#   p1, p2, p3  block producers (cardano-node 11.0.1), UNDER fault
-#               injection. 3 producers so a network partition leaves a
-#               2-vs-1 majority that anchors the canonical chain (keeps
-#               reorg depth < k); k is also raised in the genesis.
+#   p1..p5      block producers (cardano-node 11.0.1), UNDER fault
+#               injection. 5 producers so a majority (3) survives even
+#               when faults knock out 2 simultaneously, anchoring the
+#               canonical chain (keeps reorg depth < k); k is also
+#               raised in the genesis.
 #   relay1   relay, EXCLUDED from faults (stable query/submit endpoint)
 #   gov-cli  sleeping cardano-cli container; Antithesis docker-execs the
 #            governance composer drivers (create-action / vote) against
@@ -46,20 +47,23 @@ services:
     image: ghcr.io/saratomaz/cardano-node-tests-antithesis/gov-configurator@sha256:24a53721b87c3a5dbec936bc9f478487cc8c27518401d2728d2283940b77dd97
     container_name: gov-configurator
     environment:
-      NUM_POOLS: "3"
+      NUM_POOLS: "5"
       NUM_DREPS: "5"
       NUM_CC: "5"
       NETWORK_MAGIC: "42"
       PROTOCOL_VERSION: "10"
-      # 3 producers (2-vs-1 majority under partition) + larger k so the
-      # minority's reorg over a multi-minute split stays < k. epochLength
-      # = 10·k/f keeps the nonce-stability window inside an epoch.
+      # 5 producers (3-vs-2 majority survives 2 simultaneous outages)
+      # + larger k so a minority's reorg over a multi-minute split
+      # stays < k. epochLength = 10·k/f keeps the nonce-stability
+      # window inside an epoch.
       SECURITY_PARAM: "50"
       EPOCH_LENGTH: "5000"
     volumes:
       - p1-configs:/configs/1
       - p2-configs:/configs/2
       - p3-configs:/configs/3
+      - p4-configs:/configs/4
+      - p5-configs:/configs/5
       - gov-data:/gov-data
       - gov-state:/gov-state
 
@@ -100,6 +104,22 @@ services:
     hostname: p3.example
     volumes:
       - p3-configs:/configs:ro
+      - tracer:/tracer
+
+  p4:
+    <<: *cardano-node
+    container_name: p4
+    hostname: p4.example
+    volumes:
+      - p4-configs:/configs:ro
+      - tracer:/tracer
+
+  p5:
+    <<: *cardano-node
+    container_name: p5
+    hostname: p5.example
+    volumes:
+      - p5-configs:/configs:ro
       - tracer:/tracer
 
   relay1:
@@ -147,7 +167,7 @@ services:
       WORK: /work
       NUM_DREPS: "5"
       NUM_CC: "5"
-      NUM_POOLS: "3"
+      NUM_POOLS: "5"
       NUM_PAYMENT_ADDRS: "20"
     volumes:
       - relay1-state:/state:ro
@@ -167,7 +187,7 @@ services:
     environment:
       NETWORKMAGIC: 42
       PORT: 3001
-      POOLS: "3"
+      POOLS: "5"
     container_name: sidecar
     hostname: sidecar.example
     labels:
@@ -188,7 +208,7 @@ services:
     command:
       - "/opt/cardano-tracer/logs"
     environment:
-      POOLS: "3"
+      POOLS: "5"
       CHAINPOINT_FILEPATH: "/opt/cardano-tracer/chainPoints.log"
     volumes:
       - tracer:/opt/cardano-tracer
@@ -213,6 +233,8 @@ volumes:
   p1-configs:
   p2-configs:
   p3-configs:
+  p4-configs:
+  p5-configs:
   relay1-state:
   gov-data:
   gov-state:
