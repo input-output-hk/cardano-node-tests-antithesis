@@ -20,9 +20,83 @@ jobs:
 
     timeout-minutes: 200
 
+    # contents:write to push the branch pinning the freshly fetched
+    # cardano-node image (the image push itself uses MOOG_GITHUB_PAT,
+    # not this token).
+    permissions:
+      contents: write
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v6
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@v31
+      with:
+        extra_nix_config: |
+          extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
+          extra-substituters = https://cache.iog.io/
+
+    # Pushes to ghcr.io/saratomaz/... (same namespace as gov-cli /
+    # gov-configurator), matching the account registered with moog. That
+    # namespace isn't owned by this repo, so the auto-generated
+    # GITHUB_TOKEN (scoped to this org repo) can't write to it - needs a
+    # personal PAT with write:packages instead.
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: saratomaz
+        password: ${{ secrets.MOOG_GITHUB_PAT }}
+
+    # cardano-node isn't built here: Hydra (IntersectMBO's own CI) builds
+    # every master commit and caches it at cache.iog.io. `--max-jobs 0`
+    # forbids a local build, so this only succeeds if Hydra has already
+    # cached the current tip - which is normally the case within minutes
+    # of a merge, but can occasionally lag on a very fresh commit. On
+    # failure we fall back to whatever digest is already pinned in
+    # docker-compose.yaml instead of failing the run.
+    - name: Fetch cardano-node master from Hydra cache
+      id: node-image
+      continue-on-error: true
+      run: |
+        set -euo pipefail
+        LOCKED_URL=$(nix flake metadata github:IntersectMBO/cardano-node/master --json | jq -r .url)
+        echo "building: $LOCKED_URL"
+        nix build --print-out-paths --builders "" --max-jobs 0 \
+          --out-link ./cardano-node-image \
+          "${LOCKED_URL}#packages.x86_64-linux.dockerImage/node"
+
+        nix profile install nixpkgs#skopeo
+
+        DEST="ghcr.io/saratomaz/cardano-node-tests-antithesis/cardano-node-master:${GITHUB_RUN_ID}"
+        skopeo copy "docker-archive:./cardano-node-image" "docker://${DEST}"
+        DIGEST=$(skopeo inspect --no-tags "docker://${DEST}" | jq -r .Digest)
+        echo "image=ghcr.io/saratomaz/cardano-node-tests-antithesis/cardano-node-master@${DIGEST}" >> "$GITHUB_OUTPUT"
+
+    - name: Pin fetched image into docker-compose.yaml
+      id: pin
+      if: steps.node-image.outcome == 'success'
+      env:
+        NEW_IMAGE: ${{ steps.node-image.outputs.image }}
+      run: |
+        set -euo pipefail
+        sed -i "s|ghcr.io/intersectmbo/cardano-node@sha256:[0-9a-f]*|${NEW_IMAGE}|g" \
+          "$TESTNET/docker-compose.yaml"
+
+        if git diff --quiet; then
+          echo "cardano-node master image unchanged, nothing to pin"
+          exit 0
+        fi
+
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        BRANCH="antithesis/governance-master-${GITHUB_RUN_ID}"
+        git checkout -b "$BRANCH"
+        git add "$TESTNET/docker-compose.yaml"
+        git commit -m "Pin cardano-node master (Hydra build, run ${GITHUB_RUN_ID}) for Antithesis"
+        git push origin "$BRANCH"
+        echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
     - name: Install moog
       env:
@@ -49,7 +123,7 @@ jobs:
       id: request
       run: |
         set -euo pipefail
-        COMMIT="${{ github.sha }}"
+        COMMIT="${{ steps.pin.outputs.sha || github.sha }}"
         TRY=$(moog facts test-runs --whose "$MOOG_REQUESTER" | jq \
           --arg commit "$COMMIT" \
           --arg directory "$TESTNET" \
