@@ -36,7 +36,7 @@ volumes (`gov-data`, `gov-state`).
 ## Governance operations (gov-cli drivers)
 
 Each logical cardano-cli operation is a separate composer driver
-(`components/gov-cli/composer/governance-{bash,python}/`):
+(`components/gov-cli/composer/governance-python/`):
 
 1. `first_setup` — submits the CC hot-key authorizations, DRep
    registrations and vote-stake delegations, waits one epoch, and also
@@ -51,9 +51,7 @@ Each logical cardano-cli operation is a separate composer driver
 InfoActions never enact, so the create/vote workload is unbounded and
 chain state never drifts — ideal under continuous fault injection.
 
-The python drivers use the standalone `cardano-clusterlib` library; the
-bash drivers call `cardano-cli` directly. Pick one with the gov-cli
-image build arg `DRIVER_LANG=bash|python`.
+The drivers use the standalone `cardano-clusterlib` library.
 
 ## Validation status
 

@@ -2,15 +2,11 @@
 # governance driver scripts. Antithesis `docker exec`s the drivers per
 # tick to drive governance operations against relay1.
 #
-# Two interchangeable driver sets ship in the image:
-#   * bash   — cardano-cli wrapped in shell (composer/governance-bash)
-#   * python — cardano-clusterlib (the standalone cardano-cli wrapper
-#              library) driving the same flow (composer/governance-python)
-# Pick one at build time:  --build-arg DRIVER_LANG=bash|python
+# Drivers use cardano-clusterlib (the standalone cardano-cli wrapper
+# library) - composer/governance-python.
 
 FROM debian:bookworm-slim
 
-ARG DRIVER_LANG=bash
 ARG NODE_VERSION=11.0.1
 
 ENV TZ=UTC
@@ -33,22 +29,17 @@ RUN curl -fsSL \
     install -m 0755 /tmp/bin/cardano-cli /usr/local/bin/cardano-cli && \
     rm -rf /tmp/cardano.tar.gz /tmp/bin
 
-# Standalone cardano-cli wrapper library used by the python drivers.
+# Standalone cardano-cli wrapper library used by the drivers.
 RUN python3 -m pip install --no-cache-dir --break-system-packages cardano-clusterlib
 
-# Both driver sets are kept for reference; the selected one becomes the
-# live composer template at /opt/antithesis/test/v1/governance.
-COPY composer /opt/gov-drivers/
-RUN mkdir -p /opt/antithesis/test/v1 && \
-    cp -r "/opt/gov-drivers/governance-${DRIVER_LANG}" /opt/antithesis/test/v1/governance && \
-    chmod 0644 /opt/antithesis/test/v1/governance/* && \
+# Becomes the live composer template at /opt/antithesis/test/v1/governance.
+COPY composer/governance-python /opt/antithesis/test/v1/governance
+RUN chmod 0644 /opt/antithesis/test/v1/governance/* && \
     chmod 0755 /opt/antithesis/test/v1/governance/first_* \
                /opt/antithesis/test/v1/governance/parallel_* \
                /opt/antithesis/test/v1/governance/anytime_* \
                /opt/antithesis/test/v1/governance/eventually_* \
-               /opt/antithesis/test/v1/governance/finally_* && \
-    find /opt/gov-drivers -type f -exec chmod 0644 {} + && \
-    find /opt/gov-drivers -name 'first_*' -o -name 'parallel_*' -o -name 'anytime_*' -o -name 'eventually_*' -o -name 'finally_*' | xargs chmod 0755
+               /opt/antithesis/test/v1/governance/finally_*
 
 COPY sleep.sh /sleep.sh
 RUN chmod 0755 /sleep.sh
