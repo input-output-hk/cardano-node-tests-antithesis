@@ -15,7 +15,6 @@ every choice: which live action, which voter, and yes/no/abstain.
 
 from __future__ import annotations
 
-import os
 import sys
 
 import helper_gov as g
@@ -23,7 +22,7 @@ import helper_sdk as sdk
 from cardano_clusterlib import clusterlib
 
 
-def build_voters():
+def build_voters(cluster: clusterlib.ClusterLib):
     """Build the voter roster: every DRep, SPO and CC member. Each entry
     is (kind, create_fn, vkey_kw, vkey_file, skey_file)."""
     voters = []
@@ -31,17 +30,17 @@ def build_voters():
         vkey = g.GD / f"default_drep_{i}_drep.vkey"
         skey = g.GD / f"default_drep_{i}_drep.skey"
         if vkey.exists():
-            voters.append(("drep", "create_drep", "drep_vkey_file", vkey, skey))
+            voters.append(("drep", cluster.g_governance.vote.create_drep, "drep_vkey_file", vkey, skey))
     for i in range(1, g.NUM_POOLS + 1):
         vkey = g.GOV / "pools" / f"node-pool{i}" / "cold.vkey"
         skey = g.GOV / "pools" / f"node-pool{i}" / "cold.skey"
         if vkey.exists():
-            voters.append(("spo", "create_spo", "cold_vkey_file", vkey, skey))
+            voters.append(("spo", cluster.g_governance.vote.create_spo, "cold_vkey_file", vkey, skey))
     for i in range(1, g.NUM_CC + 1):
         vkey = g.GD / f"cc_member{i}_committee_hot.vkey"
         skey = g.GD / f"cc_member{i}_committee_hot.skey"
         if vkey.exists():
-            voters.append(("cc", "create_committee", "cc_hot_vkey_file", vkey, skey))
+            voters.append(("cc", cluster.g_governance.vote.create_committee, "cc_hot_vkey_file", vkey, skey))
     return voters
 
 
@@ -74,11 +73,11 @@ def main() -> int:
         txid = pick["actionId"]["txId"]
         ix = pick["actionId"]["govActionIx"]
 
-        voters = build_voters()
+        voters = build_voters(cluster)
         if not voters:
             return 0
 
-        kind, create_name, vkey_kw, vkey_file, skey_file = voters[g.rng_mod(len(voters))]
+        kind, create_fn, vkey_kw, vkey_file, skey_file = voters[g.rng_mod(len(voters))]
 
         decisions = [
             (clusterlib.Votes.YES, "yes"),
@@ -87,10 +86,9 @@ def main() -> int:
         ]
         vote_enum, decision = decisions[g.rng_mod(3)]
 
-        tok = f"{g.antithesis_rng()}_{os.getpid()}"
+        tok = g.unique_token()
         print(f"voting {decision} as {kind} on {txid}#{ix}", file=sys.stderr)
 
-        create_fn = getattr(cluster.g_governance.vote, create_name)
         vote = create_fn(
             vote_name=f"{kind}_{tok}",
             action_txid=txid,
@@ -117,9 +115,7 @@ def main() -> int:
         drep_n = spo_n = cc_n = 0
         try:
             prop = g.lookup_proposal(cluster.g_query.get_gov_state(), txid) or {}
-            drep_n = len(prop.get("dRepVotes") or {})
-            spo_n = len(prop.get("stakePoolVotes") or {})
-            cc_n = len(prop.get("committeeVotes") or {})
+            drep_n, spo_n, cc_n = g.vote_counts(prop)
         except Exception:  # noqa: BLE001
             pass
         total = drep_n + spo_n + cc_n
@@ -150,11 +146,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    try:
-        rc = main()
-        sdk.always(rc == 0, "vote_exits_zero")
-        sys.exit(rc)
-    except Exception as exc:  # noqa: BLE001
-        print(f"vote aborted: {exc}", file=sys.stderr)
-        sdk.unreachable("vote_aborted")
-        sys.exit(0)
+    sdk.run_driver(main, "vote_aborted", "vote_exits_zero")

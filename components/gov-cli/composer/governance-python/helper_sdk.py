@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import sys
 
 
 def _emit(obj: dict) -> None:
@@ -75,3 +76,24 @@ def setup_complete(details: dict | None = None) -> None:
     """Emit the Antithesis lifecycle "setup complete" signal: tells the
     hypervisor the system is healthy and it may START injecting faults."""
     _emit({"antithesis_setup": {"status": "complete", "details": details}})
+
+
+def run_driver(main_fn, aborted_id: str, exits_zero_id: str | None = None) -> None:
+    """Shared `__main__` entrypoint for a driver script: run main_fn(),
+    exit with its return code, and emit the standard exits_zero/aborted
+    coverage signals under the caller's own assert IDs. Any exception is
+    absorbed into the aborted signal (exit 0) instead of crashing the
+    Antithesis scheduler.
+
+    exits_zero_id is optional since not every driver asserts it.
+    """
+    try:
+        rc = main_fn()
+        if exits_zero_id is not None:
+            always(rc == 0, exits_zero_id)
+        sys.exit(rc)
+    except Exception as exc:  # noqa: BLE001
+        label = aborted_id.removesuffix("_aborted")
+        print(f"{label} aborted: {exc}", file=sys.stderr)
+        unreachable(aborted_id)
+        sys.exit(0)

@@ -8,8 +8,6 @@ A missing node (mid-fault) is absorbed, not flagged.
 
 from __future__ import annotations
 
-import sys
-
 import helper_gov as g
 import helper_sdk as sdk
 
@@ -32,11 +30,7 @@ def main() -> int:
     # status is Active; mirror that against the full committee-state.
     if g.SETUP_MARKER.exists():
         try:
-            cs = cluster.g_query.get_committee_state()
-            members = (cs or {}).get("committee", {}) or {}
-            authorized = sum(
-                1 for m in members.values() if (m or {}).get("status") == "Active"
-            )
+            authorized = g.count_active_committee_members(cluster)
             # committeeMinSize is 2 in the seeded Conway genesis.
             sdk.always(authorized >= 2, "committee_quorum_maintained", {"authorized": authorized, "min": 2})
         except Exception:  # noqa: BLE001
@@ -48,20 +42,15 @@ def main() -> int:
     # a certificate with under fault injection, so any loss would be a
     # ledger bug, not a driver retry opportunity.
     if g.SPECIAL_DREPS_MARKER.exists():
-        for name, expected in (
-            ("always_abstain", "alwaysAbstain"),
-            ("always_no_confidence", "alwaysNoConfidence"),
-        ):
+        for name, _kwargs, expected in g.SPECIAL_DREP_TARGETS:
             addr_file = g.SPECIAL_DREPS_DIR / f"special_{name}.addr"
             if not addr_file.exists():
                 continue
             try:
                 addr = addr_file.read_text().strip()
-                info = cluster.g_query.get_stake_addr_info(addr)
+                matches, actual = g.check_vote_delegation(cluster, addr, expected)
                 sdk.always(
-                    info.vote_delegation == expected,
-                    f"special_drep_{name}_delegation_stable",
-                    {"vote_delegation": info.vote_delegation},
+                    matches, f"special_drep_{name}_delegation_stable", {"vote_delegation": actual}
                 )
             except Exception:  # noqa: BLE001
                 pass
@@ -85,11 +74,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    try:
-        rc = main()
-        sdk.always(rc == 0, "govstate_invariant_exits_zero")
-        sys.exit(rc)
-    except Exception as exc:  # noqa: BLE001
-        print(f"govstate_invariant aborted: {exc}", file=sys.stderr)
-        sdk.unreachable("govstate_invariant_aborted")
-        sys.exit(0)
+    sdk.run_driver(main, "govstate_invariant_aborted", "govstate_invariant_exits_zero")

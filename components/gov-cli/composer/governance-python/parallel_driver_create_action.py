@@ -11,7 +11,6 @@ later tick creates another action).
 
 from __future__ import annotations
 
-import os
 import sys
 
 import helper_gov as g
@@ -36,7 +35,7 @@ def main() -> int:
             sdk.unreachable("create_action_node_not_ready")
             return 0
 
-        tok = f"{g.antithesis_rng()}_{os.getpid()}"
+        tok = g.unique_token()
         deposit = cluster.g_query.get_gov_action_deposit()
         anchor_hash = cluster.g_governance.get_anchor_data_hash(text=g.ANCHOR_TEXT)
 
@@ -69,11 +68,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    try:
-        rc = main()
-        sdk.always(rc == 0, "create_action_exits_zero")
-        sys.exit(rc)
-    except Exception as exc:  # noqa: BLE001
-        print(f"create_action aborted: {exc}", file=sys.stderr)
-        sdk.unreachable("create_action_aborted")
-        sys.exit(0)
+    sdk.run_driver(main, "create_action_aborted", "create_action_exits_zero")

@@ -9,7 +9,6 @@ votes. Cold-start guarded.
 
 from __future__ import annotations
 
-import sys
 import time
 
 import helper_gov as g
@@ -33,7 +32,8 @@ def main() -> int:
 
     voted = 0
     for prop in gov_state.get("proposals", []) or []:
-        if len(prop.get("dRepVotes") or {}) >= 1 and len(prop.get("stakePoolVotes") or {}) >= 1:
+        drep_n, spo_n, _cc_n = g.vote_counts(prop)
+        if drep_n >= 1 and spo_n >= 1:
             voted += 1
 
     sdk.sometimes(voted >= 1, "action_fully_voted_after_recovery")
@@ -41,11 +41,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    try:
-        rc = main()
-        sdk.always(rc == 0, "eventually_votes_exits_zero")
-        sys.exit(rc)
-    except Exception as exc:  # noqa: BLE001
-        print(f"eventually aborted: {exc}", file=sys.stderr)
-        sdk.unreachable("eventually_aborted")
-        sys.exit(0)
+    sdk.run_driver(main, "eventually_aborted", "eventually_votes_exits_zero")

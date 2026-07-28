@@ -22,7 +22,6 @@ read for the gov_op_under_perturbation coverage.
 from __future__ import annotations
 
 import os
-import sys
 import time
 
 import helper_gov as g
@@ -65,11 +64,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    try:
-        rc = main()
-        sdk.always(rc == 0, "chain_progress_exits_zero")
-        sys.exit(rc)
-    except Exception as exc:  # noqa: BLE001
-        print(f"chain_progress aborted: {exc}", file=sys.stderr)
-        sdk.unreachable("chain_progress_aborted")
-        sys.exit(0)
+    sdk.run_driver(main, "chain_progress_aborted", "chain_progress_exits_zero")

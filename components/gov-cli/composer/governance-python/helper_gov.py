@@ -49,6 +49,14 @@ CHAIN_VERDICT = STATE_DIR / "chain_verdict"
 ANCHOR_URL = "http://localhost:8080/governance.json"
 ANCHOR_TEXT = '{"body":{"title":"antithesis governance workload"}}'
 
+# Special-DRep targets set up by first_setup.py's _setup_special_dreps and
+# checked never to drift by anytime_govstate_invariant.py. Each entry is
+# (name, vote-delegation-cert kwargs, expected ledger vote_delegation tag).
+SPECIAL_DREP_TARGETS = [
+    ("always_abstain", {"always_abstain": True}, "alwaysAbstain"),
+    ("always_no_confidence", {"always_no_confidence": True}, "alwaysNoConfidence"),
+]
+
 
 def ensure_dirs() -> None:
     for d in (WORK, STATE_DIR):
@@ -212,6 +220,38 @@ def lookup_proposal(gov_state: dict, action_txid: str):
         if prop.get("actionId", {}).get("txId") == action_txid:
             return prop
     return None
+
+
+def vote_counts(prop: dict) -> tuple[int, int, int]:
+    """(drep, spo, cc) vote counts recorded on a gov-state proposal dict."""
+    return (
+        len(prop.get("dRepVotes") or {}),
+        len(prop.get("stakePoolVotes") or {}),
+        len(prop.get("committeeVotes") or {}),
+    )
+
+
+def count_active_committee_members(cluster: clusterlib.ClusterLib) -> int:
+    """Active (authorized) constitutional-committee member count, from
+    committee-state. Raises on query failure - callers decide how to
+    handle that (see first_setup.py / anytime_govstate_invariant.py, which
+    each swallow it differently)."""
+    cs = cluster.g_query.get_committee_state()
+    members = (cs or {}).get("committee", {}) or {}
+    return sum(1 for m in members.values() if (m or {}).get("status") == "Active")
+
+
+def check_vote_delegation(
+    cluster: clusterlib.ClusterLib, addr: str, expected: str
+) -> tuple[bool, str | None]:
+    """Query stake_addr_info for addr; return (matches_expected, actual)."""
+    info = cluster.g_query.get_stake_addr_info(addr)
+    return info.vote_delegation == expected, info.vote_delegation
+
+
+def unique_token() -> str:
+    """A unique-enough tx-name suffix: RNG value + pid."""
+    return f"{antithesis_rng()}_{os.getpid()}"
 
 
 # --- Action selection: the chain IS the queue (mirrors helper_gov.sh) -

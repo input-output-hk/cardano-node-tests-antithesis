@@ -24,19 +24,13 @@ here instead.
 from __future__ import annotations
 
 import sys
-import time
 
 import helper_gov as g
 import helper_sdk as sdk
 from cardano_clusterlib import clusterlib
 
 DREP_DELEGATED = 500_000_000_000
-SPECIAL_DELEGATED = 500_000_000_000  # same weight as DREP_DELEGATED
-
-SPECIAL_DREP_TARGETS = [
-    ("always_abstain", {"always_abstain": True}, "alwaysAbstain"),
-    ("always_no_confidence", {"always_no_confidence": True}, "alwaysNoConfidence"),
-]
+SPECIAL_DELEGATED = DREP_DELEGATED
 
 
 def _setup_special_dreps(cluster: clusterlib.ClusterLib) -> dict[str, str]:
@@ -61,7 +55,7 @@ def _setup_special_dreps(cluster: clusterlib.ClusterLib) -> dict[str, str]:
         txouts: list = []
         addrs: dict[str, str] = {}
 
-        for name, deleg_kwargs, _expected in SPECIAL_DREP_TARGETS:
+        for name, deleg_kwargs, _expected in g.SPECIAL_DREP_TARGETS:
             stake_keys = cluster.g_stake_address.gen_stake_key_pair(
                 key_name=f"special_{name}",
                 destination_dir=str(g.SPECIAL_DREPS_DIR),
@@ -110,16 +104,14 @@ def _confirm_special_dreps(cluster: clusterlib.ClusterLib, addrs: dict[str, str]
     if not addrs:
         return
 
-    for name, _deleg_kwargs, expected in SPECIAL_DREP_TARGETS:
+    for name, _deleg_kwargs, expected in g.SPECIAL_DREP_TARGETS:
         addr = addrs.get(name)
         if addr is None:
             continue
         try:
-            info = cluster.g_query.get_stake_addr_info(addr)
+            matches, actual = g.check_vote_delegation(cluster, addr, expected)
             sdk.sometimes(
-                info.vote_delegation == expected,
-                f"special_drep_{name}_confirmed",
-                {"vote_delegation": info.vote_delegation},
+                matches, f"special_drep_{name}_confirmed", {"vote_delegation": actual}
             )
         except Exception:  # noqa: BLE001
             pass
@@ -198,11 +190,7 @@ def main() -> int:
 
     cc_active = 0
     try:
-        cc_state = cluster.g_query.get_committee_state()
-        members = (cc_state or {}).get("committee", {}) or {}
-        cc_active = sum(
-            1 for m in members.values() if (m or {}).get("status") == "Active"
-        )
+        cc_active = g.count_active_committee_members(cluster)
     except Exception:  # noqa: BLE001
         pass
     sdk.sometimes(cc_active >= 1, "committee_active_after_setup")
@@ -247,10 +235,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main())
-    except Exception as exc:  # noqa: BLE001
-        # Absorb fault-induced failures into a coverage signal, exit 0.
-        print(f"setup aborted: {exc}", file=sys.stderr)
-        sdk.unreachable("setup_aborted")
-        sys.exit(0)
+    sdk.run_driver(main, "setup_aborted")
