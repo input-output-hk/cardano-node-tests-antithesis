@@ -3,6 +3,7 @@ env:
   TESTNET: testnets/cardano_node_governance
   DURATION: 2
 on:
+  workflow_dispatch:
   schedule:
     # run once a week
     - cron: '5 1 * * 1'
