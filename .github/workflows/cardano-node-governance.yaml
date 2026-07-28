@@ -180,3 +180,23 @@ jobs:
 
     - name: Wait for results
       run: timeout $(((DURATION + 1) * 3600)) ./scripts/wait-for-test.sh "${{ steps.request.outputs.id }}"
+
+    # wait-for-test.sh only reports pass/fail, not the report link. The
+    # report url on the test-run fact is encrypted; decrypting it needs the
+    # wallet/passphrase already in this job's env (same as the other moog
+    # calls above).
+    - name: Report Antithesis result link
+      if: always()
+      run: |
+        set -euo pipefail
+        RESULT=$(moog facts test-runs --test-run-id "${{ steps.request.outputs.id }}")
+        OUTCOME=$(echo "$RESULT" | jq -r '.[0].value.outcome // "unknown"')
+        URL=$(echo "$RESULT" | jq -r '.[0].value.url // empty')
+        echo "outcome: $OUTCOME"
+        {
+          echo "### Antithesis test run"
+          echo "- outcome: **$OUTCOME**"
+          if [ -n "$URL" ]; then
+            echo "- report: $URL"
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"
