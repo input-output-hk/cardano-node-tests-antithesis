@@ -107,10 +107,19 @@ jobs:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         set -euo pipefail
-        # Latest moog release. The portable Linux requester binary is the
-        # statically-linked musl tarball (the old `*-linux64.tar.gz`
-        # asset was dropped at the 0.5.x packaging change).
-        TAG=$(gh release view -R cardano-foundation/moog --json tagName -q .tagName)
+        # Pinned, NOT latest: v2.0.0+ added a client-side precondition that
+        # probes GET /status on the MPFS host as part of an in-progress
+        # "mpfs-v2" migration (moog#96, moog#101 - still open). Production
+        # mpfs.plutimus.com still only serves the legacy API, so /status
+        # 404s and every moog command fails immediately. v0.5.1.5 is the
+        # last release before that migration work and works against the
+        # current production server. Bump this once moog#101 lands and a
+        # new release is confirmed compatible with mpfs.plutimus.com.
+        #
+        # The portable Linux requester binary is the statically-linked musl
+        # tarball (the old `*-linux64.tar.gz` asset was dropped at the 0.5.x
+        # packaging change).
+        TAG=v0.5.1.5
         echo "moog release: $TAG"
         gh release download "$TAG" -R cardano-foundation/moog \
           -p 'moog-*-x86_64-linux-musl.tar.gz' --clobber
