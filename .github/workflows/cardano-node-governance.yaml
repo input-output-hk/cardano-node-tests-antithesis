@@ -126,14 +126,21 @@ jobs:
       run: |
         set -euo pipefail
         COMMIT="${{ steps.pin.outputs.sha || github.sha }}"
-        TRY=$(moog facts test-runs --whose "$MOOG_REQUESTER" | jq \
+
+        # Captured (instead of piped straight into jq) so the raw response
+        # is visible in the log if it's ever shaped unexpectedly.
+        FACTS=$(moog facts test-runs --whose "$MOOG_REQUESTER")
+        echo "$FACTS"
+        TRY=$(echo "$FACTS" | jq \
           --arg commit "$COMMIT" \
           --arg directory "$TESTNET" \
           --arg platform "$MOOG_PLATFORM" \
           --arg repository "$GITHUB_REPOSITORY" \
           --arg requester "$MOOG_REQUESTER" \
-          'map(select(
-            .key.type == "test-run"
+          '(if type == "array" then . else [.] end)
+          | map(select(
+            type == "object"
+            and .key.type == "test-run"
             and .key.commitId == $commit
             and .key.directory == $directory
             and .key.platform == $platform
