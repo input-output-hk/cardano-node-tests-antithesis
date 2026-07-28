@@ -22,7 +22,7 @@ jobs:
     timeout-minutes: 200
 
     # contents:write to push the branch pinning the freshly fetched
-    # cardano-node image (the image push itself uses MOOG_GITHUB_PAT,
+    # cardano-node image (the image push itself uses GHCR_PAT,
     # not this token).
     permissions:
       contents: write
@@ -42,13 +42,14 @@ jobs:
     # gov-configurator), matching the account registered with moog. That
     # namespace isn't owned by this repo, so the auto-generated
     # GITHUB_TOKEN (scoped to this org repo) can't write to it - needs a
-    # personal PAT with write:packages instead.
+    # personal PAT with write:packages instead (GHCR_PAT, separate from
+    # MOOG_GITHUB_PAT which moog itself uses).
     - name: Log in to GitHub Container Registry
       uses: docker/login-action@v3
       with:
         registry: ghcr.io
         username: saratomaz
-        password: ${{ secrets.MOOG_GITHUB_PAT }}
+        password: ${{ secrets.GHCR_PAT }}
 
     # cardano-node isn't built here: Hydra (IntersectMBO's own CI) builds
     # every master commit and caches it at cache.iog.io. `--max-jobs 0`
