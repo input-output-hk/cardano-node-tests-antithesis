@@ -19,7 +19,11 @@ jobs:
       MOOG_MPFS_HOST: ${{ vars.MOOG_MPFS_HOST }}
       MOOG_TOKEN_ID: ${{ vars.MOOG_TOKEN_ID }}
       MOOG_PLATFORM: github
-      MOOG_REQUESTER: cfhal
+      # saratomaz, not cfhal - cfhal is only role-registered against
+      # cardano-foundation/* repos; saratomaz holds the register-role
+      # for input-output-hk/cardano-node-tests-antithesis (and matches
+      # the wallet/SSH key configured via MOOG_REQUESTER_WALLET here).
+      MOOG_REQUESTER: saratomaz
 
     timeout-minutes: 200
 
