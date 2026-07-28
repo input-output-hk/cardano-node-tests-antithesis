@@ -14,6 +14,8 @@ jobs:
     env:
       MOOG_GITHUB_PAT: ${{ secrets.MOOG_GITHUB_PAT }}
       MOOG_WALLET_FILE: wallet.json
+      MOOG_WALLET_PASSPHRASE: ${{ secrets.MOOG_WALLET_PASSPHRASE }}
+      MOOG_SSH_PASSWORD: ${{ secrets.MOOG_WALLET_PASSPHRASE }}
       MOOG_MPFS_HOST: ${{ vars.MOOG_MPFS_HOST }}
       MOOG_TOKEN_ID: ${{ vars.MOOG_TOKEN_ID }}
       MOOG_PLATFORM: github
