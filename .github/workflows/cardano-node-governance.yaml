@@ -15,6 +15,8 @@ jobs:
       MOOG_GITHUB_PAT: ${{ secrets.MOOG_GITHUB_PAT }}
       MOOG_WALLET_FILE: wallet.json
       MOOG_WALLET_PASSPHRASE: ${{ secrets.MOOG_WALLET_PASSPHRASE }}
+      # Same secret reused: the wallet mnemonics and the SSH key share one
+      # passphrase in this setup.
       MOOG_SSH_PASSWORD: ${{ secrets.MOOG_WALLET_PASSPHRASE }}
       MOOG_MPFS_HOST: ${{ vars.MOOG_MPFS_HOST }}
       MOOG_TOKEN_ID: ${{ vars.MOOG_TOKEN_ID }}
@@ -179,10 +181,10 @@ jobs:
           -t "$DURATION")
         echo "$RESULT"
 
-        # Passing -e and -r in separate jq calls ensures we both unwrap
-        # the string quotes and fail if the json isn't as expected.
-        ID=$(echo "$RESULT" | jq -e .value.testRunId | jq -r .)
-        TXID=$(echo "$RESULT" | jq -e .txHash | jq -r .)
+        # -e fails the step if the field is missing/null; -r unwraps the
+        # string quotes.
+        ID=$(echo "$RESULT" | jq -er .value.testRunId)
+        TXID=$(echo "$RESULT" | jq -er .txHash)
         echo "id=$ID" >> "$GITHUB_OUTPUT"
         echo "txHash=$TXID" >> "$GITHUB_OUTPUT"
 
