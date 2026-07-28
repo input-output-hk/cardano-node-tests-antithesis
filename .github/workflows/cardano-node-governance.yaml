@@ -77,6 +77,14 @@ jobs:
 
         nix profile install nixpkgs#skopeo
 
+        # The runner's /etc/containers/registries.conf is legacy v1 format,
+        # which this skopeo (via nixpkgs) refuses to read ("registries.conf
+        # must be in v2 format but is in v1"). Point it at a minimal v2
+        # config instead of touching the system file.
+        REGISTRIES_CONF="$(mktemp)"
+        echo 'unqualified-search-registries = ["docker.io"]' > "$REGISTRIES_CONF"
+        export CONTAINERS_REGISTRIES_CONF="$REGISTRIES_CONF"
+
         DEST="ghcr.io/saratomaz/cardano-node-tests-antithesis/cardano-node-master:${GITHUB_RUN_ID}"
         skopeo copy "docker-archive:./cardano-node-image" "docker://${DEST}"
         DIGEST=$(skopeo inspect --no-tags "docker://${DEST}" | jq -r .Digest)
