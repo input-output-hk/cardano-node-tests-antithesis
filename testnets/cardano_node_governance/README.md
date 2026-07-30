@@ -53,6 +53,10 @@ chain state never drifts — ideal under continuous fault injection.
 
 The drivers use the standalone `cardano-clusterlib` library.
 
+See [`PROPERTIES.md`](PROPERTIES.md) for every assertion these drivers
+emit and what it means - the reference for "what's actually tested" and
+which failures represent real invariant violations versus coverage gaps.
+
 ## Validation status
 
 Syntax-checked only in this environment (no cardano-cli / cardonnay /
