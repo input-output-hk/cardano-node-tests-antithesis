@@ -29,12 +29,7 @@ push_image() {
     local tag="${REPO}/${name}:latest"
 
     echo "==> Building ${name}..."
-    local build_args=()
-    if [[ "${name}" == "gov-cli" ]]; then
-        build_args=(--build-arg DRIVER_LANG=python)
-    fi
-
-    docker build "${build_args[@]}" \
+    docker build \
         --platform linux/amd64 \
         -t "${tag}" \
         "components/${name}/"
