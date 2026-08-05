@@ -7,7 +7,11 @@ set -euo pipefail
 
 ID="$1"
 
-function query_run() { moog facts test-runs --test-run-id "$ID" | jq '.[0]'; }
+# moog's output has occasionally contained raw, unescaped control
+# characters inside a JSON string value (e.g. a literal newline instead
+# of \n in a log/report field), which jq rejects outright. Strip C0
+# control characters before parsing.
+function query_run() { moog facts test-runs --test-run-id "$ID" | tr -d '\000-\037' | jq '.[0]'; }
 
 echo "waiting to be accepted..."
 while true; do

@@ -156,7 +156,11 @@ jobs:
         # is visible in the log if it's ever shaped unexpectedly.
         FACTS=$(moog facts test-runs --whose "$MOOG_REQUESTER")
         echo "$FACTS"
-        TRY=$(echo "$FACTS" | jq \
+        # moog's output has occasionally contained raw, unescaped control
+        # characters inside a JSON string value, which jq rejects outright
+        # (see scripts/wait-for-test.sh). Strip C0 control characters
+        # before parsing, after logging the raw response above.
+        TRY=$(echo "$FACTS" | tr -d '\000-\037' | jq \
           --arg commit "$COMMIT" \
           --arg directory "$TESTNET" \
           --arg platform "$MOOG_PLATFORM" \
@@ -182,7 +186,8 @@ jobs:
         echo "$RESULT"
 
         # -e fails the step if the field is missing/null; -r unwraps the
-        # string quotes.
+        # string quotes. Strip control characters first (see above).
+        RESULT=$(echo "$RESULT" | tr -d '\000-\037')
         ID=$(echo "$RESULT" | jq -er .value.testRunId)
         TXID=$(echo "$RESULT" | jq -er .txHash)
         echo "id=$ID" >> "$GITHUB_OUTPUT"
@@ -199,7 +204,11 @@ jobs:
       if: always()
       run: |
         set -euo pipefail
-        RESULT=$(moog facts test-runs --test-run-id "${{ steps.request.outputs.id }}")
+        # moog's output has occasionally contained raw, unescaped control
+        # characters inside a JSON string value, which jq rejects outright
+        # (see scripts/wait-for-test.sh). Strip C0 control characters
+        # before parsing.
+        RESULT=$(moog facts test-runs --test-run-id "${{ steps.request.outputs.id }}" | tr -d '\000-\037')
         OUTCOME=$(echo "$RESULT" | jq -r '.[0].value.outcome // "unknown"')
         URL=$(echo "$RESULT" | jq -r '.[0].value.url // empty')
         echo "outcome: $OUTCOME"
