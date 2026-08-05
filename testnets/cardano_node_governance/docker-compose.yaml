@@ -18,7 +18,7 @@
 # (first_) plus parallel create/vote drivers.
 
 x-cardano-node: &cardano-node
-  image: ghcr.io/intersectmbo/cardano-node@sha256:007da778998d0bdb043fb834c62b9da1c95e33610f31f6f9cccab29a945e2b99
+  image: ghcr.io/saratomaz/cardano-node-tests-antithesis/cardano-node-master@sha256:45f7c35c458ca090a723a7bebf2baf1fb9dcbe103a7632fe85710de68e3932c0
   environment:
     CARDANO_BLOCK_PRODUCER: true
   command: >
@@ -107,7 +107,7 @@ services:
       - tracer:/tracer
 
   relay1:
-    image: ghcr.io/intersectmbo/cardano-node@sha256:007da778998d0bdb043fb834c62b9da1c95e33610f31f6f9cccab29a945e2b99
+    image: ghcr.io/saratomaz/cardano-node-tests-antithesis/cardano-node-master@sha256:45f7c35c458ca090a723a7bebf2baf1fb9dcbe103a7632fe85710de68e3932c0
     container_name: relay1
     hostname: relay1.example
     labels:
