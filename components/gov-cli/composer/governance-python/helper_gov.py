@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+import json
 import os
 import pathlib
 import subprocess
@@ -35,6 +36,8 @@ STATE_DIR = GOV / "state"
 SETUP_MARKER = STATE_DIR / "setup_done"
 SPECIAL_DREPS_MARKER = STATE_DIR / "special_dreps_setup_done"
 SPECIAL_DREPS_DIR = GOV / "special_dreps"
+TREASURY_RECV_MARKER = STATE_DIR / "treasury_recv_pool_registered"
+TREASURY_RECV_DIR = GOV / "treasury_recv"
 FAUCET_LOCK = STATE_DIR / "faucet.lock"
 PAYMENT_POOL = GOV / "payment_pool"
 NUM_PAYMENT_ADDRS = int(os.environ.get("NUM_PAYMENT_ADDRS", "20"))
@@ -45,6 +48,10 @@ PAYMENT_ADDR_FUND = int(os.environ.get("PAYMENT_ADDR_FUND", "10000000000"))  # 1
 # samples block production; the create/vote drivers read it to assert
 # that a governance op landed while the chain was degraded.
 CHAIN_VERDICT = STATE_DIR / "chain_verdict"
+
+# One recv_{idx}.json per treasury_recv{idx} currently claimed as a
+# treasury withdrawal's funds-receiving target - see claim_recv_slot.
+PENDING_TREASURY_WITHDRAWALS_DIR = STATE_DIR / "pending_treasury_withdrawals"
 
 ANCHOR_URL = "http://localhost:8080/governance.json"
 ANCHOR_TEXT = '{"body":{"title":"antithesis governance workload"}}'
@@ -59,7 +66,7 @@ SPECIAL_DREP_TARGETS = [
 
 
 def ensure_dirs() -> None:
-    for d in (WORK, STATE_DIR):
+    for d in (WORK, STATE_DIR, PENDING_TREASURY_WITHDRAWALS_DIR):
         d.mkdir(parents=True, exist_ok=True)
 
 
@@ -169,6 +176,77 @@ def release_payment_addr(fh) -> None:
         pass
 
 
+# --- Funds-receiving slot coordination for treasury withdrawals ------
+#
+# A treasury withdrawal pays out to its funds-receiving stake credential's
+# *reward account*, not a UTxO, so confirming a withdrawal actually paid
+# out means comparing that address's reward balance before and after -
+# across ticks, i.e. across separate processes. At most one pending
+# withdrawal is ever attached to a given TREASURY_RECV_DIR/treasury_recv{i}
+# address at a time (enforced by the O_EXCL claim below), so any balance
+# change observed while a claim is outstanding can only be that one
+# withdrawal - see anytime_treasury_withdrawal_enactment.py.
+#
+# This pool is deliberately separate from vote_stake_addr{i} (used
+# elsewhere as a deposit-return target, by both parallel_driver_create_
+# action.py and this workload's own deposit-return picks): a deposit
+# refund lands on a stake credential's reward account exactly like a
+# withdrawal payout does, so reusing a deposit-return address here would
+# let an unrelated refund inflate an in-flight claim's observed delta and
+# trip a false treasury_withdrawal_no_overpay failure. treasury_recv{i}
+# addresses are registered once by first_setup.py and never referenced
+# as anyone's deposit-return target, so nothing but a withdrawal this
+# workload is tracking can ever move their balance.
+
+
+def claim_recv_slot(idx: int, pre_balance: int, claimed_epoch: int) -> bool:
+    """Atomically reserve treasury_recv{idx} as the funds-receiving
+    target for one pending treasury withdrawal. O_EXCL makes the claim
+    itself race-safe across concurrent driver ticks. False if idx is
+    already claimed."""
+    ensure_dirs()
+    path = PENDING_TREASURY_WITHDRAWALS_DIR / f"recv_{idx}.json"
+    try:
+        fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return False
+    with os.fdopen(fd, "w") as fh:
+        fh.write(json.dumps({"claimed_epoch": claimed_epoch, "pre_balance": pre_balance}))
+    return True
+
+
+def complete_recv_slot(idx: int, **fields) -> None:
+    """Fill in a claimed slot with the submitted action's details
+    (recv_addr, txid, ix, transfer_amt) once build_sign_submit succeeds."""
+    path = PENDING_TREASURY_WITHDRAWALS_DIR / f"recv_{idx}.json"
+    try:
+        record = json.loads(path.read_text())
+    except Exception:  # noqa: BLE001
+        record = {}
+    record.update(fields)
+    path.write_text(json.dumps(record))
+
+
+def release_recv_slot(idx: int) -> None:
+    path = PENDING_TREASURY_WITHDRAWALS_DIR / f"recv_{idx}.json"
+    with contextlib.suppress(FileNotFoundError):
+        path.unlink()
+
+
+def pending_recv_slots() -> list[tuple[int, dict]]:
+    """[(idx, record)] for every currently-claimed funds-receiving slot."""
+    out: list[tuple[int, dict]] = []
+    if not PENDING_TREASURY_WITHDRAWALS_DIR.exists():
+        return out
+    for p in sorted(PENDING_TREASURY_WITHDRAWALS_DIR.glob("recv_*.json")):
+        try:
+            idx = int(p.stem.split("_", 1)[1])
+            out.append((idx, json.loads(p.read_text())))
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
 def build_sign_submit(
     cluster: clusterlib.ClusterLib,
     name: str,
@@ -276,6 +354,23 @@ def live_info_actions(cluster: clusterlib.ClusterLib):
             p
             for p in proposals
             if p.get("proposalProcedure", {}).get("govAction", {}).get("tag") == "InfoAction"
+        ]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def live_treasury_withdrawal_actions(cluster: clusterlib.ClusterLib):
+    """Return the current TreasuryWithdrawals proposals (each a full
+    gov-state proposal). Empty list if none or if the node can't be
+    reached. Mirrors live_info_actions - unlike InfoActions, these
+    actions leave the set once ratified+enacted, not just on expiry."""
+    try:
+        proposals = cluster.g_query.get_gov_state().get("proposals", []) or []
+        return [
+            p
+            for p in proposals
+            if p.get("proposalProcedure", {}).get("govAction", {}).get("tag")
+            == "TreasuryWithdrawals"
         ]
     except Exception:  # noqa: BLE001
         return []

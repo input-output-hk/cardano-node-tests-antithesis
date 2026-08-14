@@ -42,7 +42,7 @@ testnets/            One directory per Antithesis testnet
 Exercises Conway on-chain governance continuously under fault injection against a 3-producer + 1-relay network:
 
 - **Setup**: registers DReps, authorizes Constitutional Committee hot keys, delegates vote-stake.
-- **Workload**: continuously submits InfoActions and casts DRep / SPO / CC votes on live actions. InfoActions never enact, so the workload is unbounded and chain state never drifts.
+- **Workload**: continuously submits InfoActions and casts DRep / SPO / CC votes on live actions. InfoActions never enact, so the workload is unbounded and chain state never drifts. Also submits TreasuryWithdrawals actions and casts DRep / CC votes on them (SPOs can't vote on this action type); unlike InfoActions these do ratify and enact, exercising the enactment/treasury-debit path, kept safe by a small bounded transfer amount per action.
 - **Invariants**: checks that governance state is well-formed, committee quorum is maintained after faults, and votes are recorded after recovery.
 - **Perturbation witness**: samples whether block production stalled under active faults, giving Antithesis a signal to guide fault scheduling toward governance operations on a degraded chain.
 

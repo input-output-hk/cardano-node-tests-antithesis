@@ -19,6 +19,14 @@ polled for this script's SETUP_MARKER with its own 30-minute timeout —
 since it shares the same faucet and can't run before this script's own
 registration tx, the two clocks raced under load and it was folded in
 here instead.
+
+Also registers a small dedicated pool of fresh stake addresses
+(treasury_recv{i}) used only as treasury-withdrawal funds-receiving
+targets by parallel_driver_create_treasury_withdrawal.py - kept separate
+from vote_stake_addr{i} (already a deposit-return sink elsewhere) so a
+withdrawal's reward-balance delta can be attributed unambiguously. The
+same faucet-race reasoning as above is why this lives here instead of
+its own first_ script.
 """
 
 from __future__ import annotations
@@ -121,6 +129,63 @@ def _confirm_special_dreps(cluster: clusterlib.ClusterLib, addrs: dict[str, str]
     print(f"special-DRep setup complete ({', '.join(addrs)})", file=sys.stderr)
 
 
+def _setup_treasury_recv_pool(cluster: clusterlib.ClusterLib) -> None:
+    """One-shot: register NUM_DREPS fresh, dedicated stake addresses used
+    ONLY as treasury-withdrawal funds-receiving targets - never as
+    anyone's deposit-return target. parallel_driver_create_treasury_
+    withdrawal.py claims one at a time and anytime_treasury_withdrawal_
+    enactment.py diffs its reward balance across ticks to confirm a
+    withdrawal paid out exactly once; that comparison only holds if
+    nothing else can ever move these addresses' balances, which ruled
+    out reusing vote_stake_addr{i} (see helper_gov.py). No epoch wait
+    needed: a stake registration is valid for governance-action
+    targeting as soon as it's on-chain, unlike DRep delegation.
+    """
+    sdk.reachable("treasury_recv_pool_setup entered")
+
+    if g.TREASURY_RECV_MARKER.exists():
+        sdk.sometimes(True, "treasury_recv_pool_already_done")
+        return
+
+    g.TREASURY_RECV_DIR.mkdir(parents=True, exist_ok=True)
+
+    try:
+        deposit = cluster.g_query.get_address_deposit()
+        cert_files: list = []
+        signing: list = []
+
+        for i in range(1, g.NUM_DREPS + 1):
+            name = f"treasury_recv{i}"
+            stake_keys = cluster.g_stake_address.gen_stake_key_pair(
+                key_name=name, destination_dir=str(g.TREASURY_RECV_DIR)
+            )
+            reg_cert = cluster.g_stake_address.gen_stake_addr_registration_cert(
+                addr_name=name,
+                deposit_amt=deposit,
+                stake_vkey_file=stake_keys.vkey_file,
+                destination_dir=str(g.TREASURY_RECV_DIR),
+            )
+            # Derive+persist the address once here so downstream ticks
+            # never need another cardano-cli call just to read it back.
+            cluster.g_stake_address.gen_stake_addr(
+                addr_name=name, stake_vkey_file=stake_keys.vkey_file, destination_dir=str(g.TREASURY_RECV_DIR)
+            )
+            cert_files.append(reg_cert)
+            signing.append(stake_keys.skey_file)
+
+        g.build_sign_submit(
+            cluster, "setup_treasury_recv_pool", certificate_files=cert_files, signing_key_files=signing
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"treasury-recv pool registration failed: {exc}", file=sys.stderr)
+        sdk.unreachable("treasury_recv_pool_registration_failed")
+        return
+
+    g.TREASURY_RECV_MARKER.touch()
+    sdk.sometimes(True, "treasury_recv_pool_registered")
+    print(f"treasury-recv pool registered ({g.NUM_DREPS} addresses)", file=sys.stderr)
+
+
 def main() -> int:
     sdk.reachable("first_setup entered")
     g.ensure_dirs()
@@ -177,6 +242,7 @@ def main() -> int:
     sdk.sometimes(True, "governance_registration_submitted")
 
     special_drep_addrs = _setup_special_dreps(cluster)
+    _setup_treasury_recv_pool(cluster)
 
     # DRep stake delegation takes effect at the next epoch boundary.
     try:

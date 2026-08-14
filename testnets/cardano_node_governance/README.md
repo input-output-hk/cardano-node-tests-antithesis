@@ -42,14 +42,28 @@ Each logical cardano-cli operation is a separate composer driver
    registrations and vote-stake delegations, waits one epoch, and also
    delegates two freshly generated vote-stake addresses to the
    always-abstain / always-no-confidence targets (auto-counted by the
-   ledger, no vote tx needed).
+   ledger, no vote tx needed). Also registers a small dedicated pool of
+   fresh stake addresses used only as treasury-withdrawal
+   funds-receiving targets (never anyone's deposit-return target, so
+   their reward balance is unambiguously attributable — see below).
 2. `parallel_driver_create_action` — submits an InfoAction.
 3. `parallel_driver_vote` — casts DRep + SPO + CC votes on a pending
    action.
-4. `anytime_` / `eventually_` / `finally_` validators.
+4. `parallel_driver_create_treasury_withdrawal` — submits a
+   TreasuryWithdrawals action (small, bounded transfer amount).
+5. `parallel_driver_vote_treasury_withdrawal` — casts DRep + CC votes
+   (SPOs can't vote on this action type) on a pending withdrawal.
+6. `anytime_treasury_withdrawal_enactment` — confirms a resolved
+   withdrawal's funds-receiving reward account actually settled
+   correctly (and never paid out twice - see PROPERTIES.md).
+7. Remaining `anytime_` / `eventually_` / `finally_` validators.
 
 InfoActions never enact, so the create/vote workload is unbounded and
 chain state never drifts — ideal under continuous fault injection.
+Treasury withdrawals are the opposite on purpose: they DO ratify and
+enact once approved, exercising the enactment/treasury-debit path the
+InfoAction workload skips, kept safe by a small (1-5 ADA) transfer
+amount per action.
 
 The drivers use the standalone `cardano-clusterlib` library.
 

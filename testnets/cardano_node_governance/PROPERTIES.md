@@ -65,6 +65,61 @@ below since they're identical scaffolding, not test-specific behavior.
 | `action_majority_reached` | Sometimes | a single action's votes crossed the majority threshold |
 | `gov_op_under_perturbation` (`op: vote`) | Sometimes | a vote landed while the chain was recently stalled |
 
+## `parallel_driver_create_treasury_withdrawal.py` — submit one TreasuryWithdrawals action
+
+Unlike an InfoAction, this DOES ratify and enact once DRep+CC approval
+clears (SPOs can't vote on it at all - see the vote driver below), so it
+exercises the enactment/treasury-debit path the InfoAction workload
+deliberately skips. `transfer_amt` is kept small (1-5 ADA) so a long run
+can't meaningfully drain the treasury even with many enactments.
+
+| Assertion | Type | Meaning |
+|---|---|---|
+| `create_treasury_withdrawal entered` | Reachable | driver ran |
+| `create_treasury_withdrawal_node_not_ready` | Unreachable | node never answered within the wait budget |
+| `treasury_withdrawal_created` | Sometimes (True and False variants) | coverage of both submit outcomes |
+| `gov_op_under_perturbation` (`op: create_treasury_withdrawal`) | Sometimes | a treasury withdrawal action landed while the chain was recently stalled |
+
+## `parallel_driver_vote_treasury_withdrawal.py` — cast one DRep/CC vote
+
+Restricted to DRep and CC voters — cardano-node-tests' own
+`test_enact_treasury_withdrawals` confirms the CLI rejects an SPO vote on
+this action type with a `StakePoolVoter` error, so SPOs are left out of
+the roster rather than submitted and expected to fail.
+
+| Assertion | Type | Meaning |
+|---|---|---|
+| `vote_treasury_withdrawal entered` | Reachable | driver ran |
+| `vote_treasury_withdrawal_node_not_ready` | Unreachable | node never answered within the wait budget |
+| `treasury_withdrawal_actions_live` | Sometimes | ≥1 votable treasury withdrawal action existed in gov-state |
+| `treasury_withdrawal_vote_transient_failure` | Sometimes | a vote submit failed transiently (retried next tick) |
+| `treasury_withdrawal_vote_submitted` | Reachable | a vote was actually submitted |
+| `treasury_withdrawal_vote_recorded_<kind>` | Sometimes | that voter kind's (drep/cc) vote was recorded |
+| `treasury_withdrawal_vote_decision_<yes\|no\|abstain>` | Sometimes | that decision was cast at least once |
+| `treasury_withdrawal_vote_decision_<decision>_by_<kind>` | Sometimes | that decision/voter-kind combination occurred |
+| `treasury_withdrawal_voted_by_drep_and_cc` | Sometimes | a single action got votes from both roles |
+| `treasury_withdrawal_majority_reached` | Sometimes | a single action's votes crossed the majority threshold |
+| `gov_op_under_perturbation` (`op: vote_treasury_withdrawal`) | Sometimes | a vote landed while the chain was recently stalled |
+
+## `anytime_treasury_withdrawal_enactment.py` — runs continuously, including under faults
+
+Pairs with the create driver above: confirms every treasury withdrawal
+this repo submitted, once it leaves the live set, actually settled its
+funds-receiving reward account correctly - not just that the action
+disappeared from gov-state. `treasury_withdrawal_no_overpay` is the
+reason this driver exists: it's what would catch a crash between
+ratification and payout getting retried on recovery and paying out
+twice.
+
+| Assertion | Type | Meaning |
+|---|---|---|
+| `treasury_withdrawal_enactment entered` | Reachable | checker ran |
+| `treasury_withdrawal_enactment_unavailable` | Unreachable | node didn't answer a gov-state query (absorbed, not flagged) |
+| `treasury_withdrawal_slot_reclaimed_after_abandonment` | Sometimes | a funds-receiving claim outlived a create-driver process that died mid-submit, and was self-healed |
+| `treasury_withdrawal_enacted_correctly` | Sometimes | a resolved withdrawal's reward balance increased by at least the transferred amount |
+| `treasury_withdrawal_resolved_without_payout` | Sometimes | a withdrawal left the live set (rejected/expired) without a payout landing |
+| `treasury_withdrawal_no_overpay` | **Always** | a resolved withdrawal's reward-balance delta never exceeds the amount it transferred - catches a double payout on fault-recovery |
+
 ## `anytime_govstate_invariant.py` — runs continuously, including under faults
 
 | Assertion | Type | Meaning |
@@ -131,8 +186,8 @@ become `always`.
 The properties that genuinely are invariants - must hold on every check,
 no exceptions - are the **Always** ones: `govstate_well_formed`,
 `committee_quorum_maintained`, `special_drep_<name>_delegation_stable`,
-and `relay_reachable_under_fault` — plus any `unreachable` id that fires
-at all.
+`relay_reachable_under_fault`, and `treasury_withdrawal_no_overpay` —
+plus any `unreachable` id that fires at all.
 
 Note: this testnet also inherits generic consensus-safety properties
 from the shared tracer-sidecar tooling (reused from the `master`
