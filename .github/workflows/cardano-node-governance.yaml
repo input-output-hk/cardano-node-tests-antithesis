@@ -1,7 +1,11 @@
 name: "Antithesis"
 env:
   TESTNET: testnets/cardano_node_governance
-  DURATION: 2
+  # govActionLifetime is 2 epochs @ 50min/epoch (15000 slots * 0.2s) = 100min
+  # for an action to reach expiry, plus first_setup's 1-epoch wait before
+  # create/vote drivers even start - DURATION must clear that with margin
+  # for action_near_expiry (PROPERTIES.md) to ever get exercised.
+  DURATION: 4
 on:
   workflow_dispatch:
   schedule:
@@ -27,7 +31,11 @@ jobs:
       # the wallet/SSH key configured via MOOG_REQUESTER_WALLET here).
       MOOG_REQUESTER: saratomaz
 
-    timeout-minutes: 200
+    # must stay comfortably above (DURATION + 1) * 60 (the "Wait for
+    # results" step's own internal timeout, in minutes) plus setup
+    # overhead - a job-level timeout kill cancels the whole job outright,
+    # skipping even the `if: always()` report step.
+    timeout-minutes: 360
 
     # contents:write to push the branch pinning the freshly fetched
     # cardano-node image (the image push itself uses GHCR_PAT,
