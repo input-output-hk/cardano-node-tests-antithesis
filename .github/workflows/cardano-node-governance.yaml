@@ -203,7 +203,14 @@ jobs:
         echo "txHash=$TXID" >> "$GITHUB_OUTPUT"
 
     - name: Wait for results
-      run: timeout $(((DURATION + 1) * 3600)) ./scripts/wait-for-test.sh "${{ steps.request.outputs.id }}"
+      # +1h left almost no slack: a DURATION=3 run that actually took over
+      # 12h to reach a final report still got killed here at 4h, well
+      # before "finished". +2h is the most we can safely give without
+      # exceeding GitHub-hosted runners' hard 6h/360min job execution cap
+      # (timeout-minutes above) - if a run routinely takes longer than
+      # that, no buffer within a single job can cover it; would need to
+      # decouple submit/wait into separate jobs instead.
+      run: timeout $(((DURATION + 2) * 3600)) ./scripts/wait-for-test.sh "${{ steps.request.outputs.id }}"
 
     # wait-for-test.sh only reports pass/fail, not the report link. The
     # report url on the test-run fact is encrypted; decrypting it needs the
