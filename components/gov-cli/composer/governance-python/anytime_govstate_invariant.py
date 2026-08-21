@@ -55,17 +55,19 @@ def main() -> int:
             except Exception:  # noqa: BLE001
                 pass
 
-    # Lifecycle coverage (stateless, derived from gov-state): an action is
-    # in its final epoch of life when expiresAfter == the current epoch.
-    # Seeing this green proves the run lasted long enough for actions to
-    # reach the end of their govActionLifetime — the ledger owns the
-    # lifecycle, we just observe it.
+    # Lifecycle coverage (stateless, derived from gov-state): the ledger
+    # purges a proposal from `proposals` at the epoch boundary going INTO
+    # its expiresAfter epoch, so the last epoch it's actually observable
+    # in is expiresAfter - 1, not expiresAfter itself. Seeing this green
+    # proves the run lasted long enough for actions to reach the end of
+    # their govActionLifetime — the ledger owns the lifecycle, we just
+    # observe it.
     try:
         ep = cluster.g_query.get_epoch()
         near = sum(
             1
             for p in (gov_state.get("proposals", []) or [])
-            if p.get("expiresAfter") == ep
+            if p.get("expiresAfter") == ep + 1
         )
         sdk.sometimes(near >= 1, "action_near_expiry", {"near": near, "epoch": ep})
     except Exception:  # noqa: BLE001
