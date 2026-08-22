@@ -94,6 +94,13 @@ def run_driver(main_fn, aborted_id: str, exits_zero_id: str | None = None) -> No
         sys.exit(rc)
     except Exception as exc:  # noqa: BLE001
         label = aborted_id.removesuffix("_aborted")
-        print(f"{label} aborted: {exc}", file=sys.stderr)
-        unreachable(aborted_id)
+        try:
+            print(f"{label} aborted: {exc}", file=sys.stderr)
+            unreachable(aborted_id)
+        except Exception:  # noqa: BLE001
+            # A torn-down exec session (e.g. broken pipe on stderr, seen
+            # at container teardown) must never turn an already-absorbed
+            # exception into a real crash - that's exactly the kind of
+            # non-bug that pollutes the report with a misleading failure.
+            pass
         sys.exit(0)
