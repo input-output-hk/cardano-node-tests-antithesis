@@ -30,6 +30,9 @@ WORK = pathlib.Path(os.environ.get("WORK", "/work"))
 NUM_DREPS = int(os.environ.get("NUM_DREPS", "5"))
 NUM_CC = int(os.environ.get("NUM_CC", "5"))
 NUM_POOLS = int(os.environ.get("NUM_POOLS", "2"))
+# "conway" (default, Praos) or "dijkstra" (Leios) - cardano_clusterlib's
+# consts.CommandEras defines both.
+GOV_COMMAND_ERA = os.environ.get("GOV_COMMAND_ERA", "conway")
 
 GD = GOV / "governance_data"
 STATE_DIR = GOV / "state"
@@ -74,7 +77,7 @@ def make_cluster() -> clusterlib.ClusterLib:
     return clusterlib.ClusterLib(
         state_dir=str(GOV_STATE_DIR),
         socket_path=SOCKET,
-        command_era="conway",
+        command_era=GOV_COMMAND_ERA,
     )
 
 
