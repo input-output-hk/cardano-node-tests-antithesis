@@ -1,0 +1,70 @@
+name: "Rebuild governance images"
+
+# Keeps testnets/cardano_node_governance/docker-compose.yaml's gov-cli /
+# gov-configurator digests in sync with their own source automatically -
+# previously a manual `./scripts/push-gov-images.sh` + commit step after
+# every change under components/gov-cli/ or components/gov-configurator/.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "components/gov-cli/**"
+      - "components/gov-configurator/**"
+
+jobs:
+  rebuild-and-pin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # contents:write to push the re-pin commit (the image push itself
+    # uses GHCR_PAT, not this token).
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: saratomaz
+          password: ${{ secrets.GHCR_PAT }}
+
+      # The push trigger already guarantees at least one of these
+      # components changed; this narrows down which one(s), so an
+      # unrelated component's image isn't rebuilt for nothing.
+      - name: Determine which image(s) changed
+        id: changed
+        run: |
+          set -euo pipefail
+          targets=()
+          for name in gov-cli gov-configurator; do
+            if ! git diff --quiet "${{ github.event.before }}" "${{ github.sha }}" -- "components/${name}/"; then
+              targets+=("$name")
+            fi
+          done
+          echo "targets=${targets[*]}" >> "$GITHUB_OUTPUT"
+
+      - name: Rebuild and re-pin
+        if: steps.changed.outputs.targets != ''
+        run: ./scripts/push-gov-images.sh ${{ steps.changed.outputs.targets }}
+
+      - name: Commit and push the re-pin
+        if: steps.changed.outputs.targets != ''
+        run: |
+          set -euo pipefail
+          if git diff --quiet testnets/cardano_node_governance/docker-compose.yaml; then
+            echo "digest(s) unchanged, nothing to commit"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add testnets/cardano_node_governance/docker-compose.yaml
+          git commit -m "Auto re-pin ${{ steps.changed.outputs.targets }} after components/ change"
+          git push origin main
