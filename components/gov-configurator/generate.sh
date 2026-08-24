@@ -2,7 +2,7 @@
 # generate.sh — cardonnay-driven genesis + governance-asset generation
 # for the cardano_node_governance Antithesis testnet.
 #
-# Strategy: cardonnay's `conway_fast` welds genesis/asset generation to
+# Strategy: cardonnay's `local_fast` welds genesis/asset generation to
 # node startup inside common-start-fast's main(). We materialize its
 # scripts with `cardonnay create --generate-only` (template substitution
 # only, no nodes), then run a generation-only main() — the prefix of the
@@ -22,7 +22,7 @@ set -Eeuo pipefail
 trap 'echo "generate.sh failed at line $LINENO" >&2' ERR
 
 NUM_POOLS="${NUM_POOLS:-3}"
-# securityParam (k) and epochLength (slots). cardonnay's conway_fast
+# securityParam (k) and epochLength (slots). cardonnay's local_fast
 # defaults to k=10 / epochLength=1000 (k = 10·k/f with f=0.1), which is
 # far too small for an Antithesis testnet: under fault injection a
 # producer minority (or one recovering from a restart) can build/miss
@@ -60,7 +60,7 @@ mkdir -p "$GEN_ROOT" "$(dirname "$SOCK")"
 cd /tmp   # cardonnay refuses to run from inside the state dir
 
 # ---------------------------------------------------------------------
-# 1. Materialize the conway_fast scripts (generate-only = no nodes).
+# 1. Materialize the local_fast scripts (generate-only = no nodes).
 #    -s must match NUM_POOLS: cardonnay bakes one config-pool<i>.json
 #    template per -s at materialization time, so passing a smaller
 #    fixed value here (leaving the later NUM_POOLS sed patch to raise
@@ -78,7 +78,7 @@ CARDONNAY_NUM_POOLS="$CARDONNAY_NUM_POOLS" GEN_ROOT="$GEN_ROOT" python3 - <<'PY'
 import os, sys
 os.getlogin = lambda: os.environ.get("USER") or "root"
 from cardonnay.main import main
-sys.argv = ["cardonnay", "create", "-t", "conway_fast",
+sys.argv = ["cardonnay", "create", "-t", "local_fast",
             "-g", "-i", "0", "-s", os.environ["CARDONNAY_NUM_POOLS"],
             "--work-dir", os.environ["GEN_ROOT"]]
 try:
@@ -86,7 +86,7 @@ try:
 except SystemExit as exc:
     sys.exit(exc.code or 0)
 PY
-SCRIPT_DIR="${GEN_ROOT}/cluster0_conway_fast"
+SCRIPT_DIR="${GEN_ROOT}/cluster0_local_fast"
 START="${SCRIPT_DIR}/common-start-fast"
 [ -f "$START" ] || { echo "expected $START from cardonnay" >&2; exit 1; }
 

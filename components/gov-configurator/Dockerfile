@@ -1,5 +1,5 @@
 # gov-configurator — one-shot init container that uses cardonnay to
-# generate the conway_fast genesis (with the constitutional committee
+# generate the local_fast genesis (with the constitutional committee
 # seeded) plus the full governance_data asset set, then distributes the
 # artifacts to the per-node config volumes and the gov-cli volumes.
 #
@@ -9,8 +9,8 @@
 
 FROM debian:bookworm-slim
 
-# Pin cardonnay (cardano-node-tests tracks >=0.3.6,<0.4.0).
-ARG CARDONNAY_VERSION=0.3.6
+# Pin cardonnay (cardano-node-tests tracks >=0.4.4,<0.5.0).
+ARG CARDONNAY_VERSION=0.4.4
 ARG NODE_VERSION=11.0.1
 
 ENV TZ=UTC
@@ -35,7 +35,7 @@ RUN curl -fsSL \
     install -m 0755 /tmp/bin/cardano-node /usr/local/bin/cardano-node && \
     rm -rf /tmp/cardano.tar.gz /tmp/bin
 
-# cardonnay ships both the CLI and the conway_fast generation scripts.
+# cardonnay ships both the CLI and the local_fast generation scripts.
 RUN python3 -m pip install --no-cache-dir --break-system-packages "cardonnay==${CARDONNAY_VERSION}"
 
 COPY generate.sh /generate.sh
