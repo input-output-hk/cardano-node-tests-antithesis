@@ -200,6 +200,13 @@ for ((i = 1; i <= NUM_POOLS; i++)); do
     cp "${STATE}/shelley/genesis.alonzo.json" "${POOL}/configs/alonzo-genesis.json"
     cp "${STATE}/shelley/genesis.conway.json" "${POOL}/configs/conway-genesis.json"
     cp "${STATE}/byron/genesis.json"          "${POOL}/configs/byron-genesis.json"
+    # cardonnay always generates this file (like the other era genesis
+    # files, regardless of which era is actually targeted), but only
+    # wires DijkstraGenesisFile into config-pool*.json below when
+    # PROTOCOL_VERSION>=12 triggers the Dijkstra hard-fork (opt-in Leios
+    # mode, see NODE_IMAGE/GOV_COMMAND_ERA) - harmless/unused otherwise.
+    [ -f "${STATE}/shelley/genesis.dijkstra.json" ] &&
+        cp "${STATE}/shelley/genesis.dijkstra.json" "${POOL}/configs/dijkstra-genesis.json"
 
     # Node config: repoint genesis files to the in-container names, drop
     # genesis hashes (recomputed at boot), enable the trace forwarder so
@@ -218,6 +225,9 @@ for ((i = 1; i <= NUM_POOLS; i++)); do
       | .AlonzoGenesisFile  = "alonzo-genesis.json"
       | .ConwayGenesisFile  = "conway-genesis.json"
       | del(.ByronGenesisHash, .ShelleyGenesisHash, .AlonzoGenesisHash, .ConwayGenesisHash)
+      | (if has("DijkstraGenesisFile")
+         then .DijkstraGenesisFile = "dijkstra-genesis.json" | del(.DijkstraGenesisHash)
+         else . end)
       | .UseTraceDispatcher = true
       | .TurnOnLogging = true
       | .TraceOptions = {
