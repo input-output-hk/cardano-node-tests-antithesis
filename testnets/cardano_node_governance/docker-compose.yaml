@@ -54,7 +54,9 @@ services:
       NUM_DREPS: "5"
       NUM_CC: "5"
       NETWORK_MAGIC: "42"
-      PROTOCOL_VERSION: "10"
+      # 12 triggers the Dijkstra hard-fork for an opt-in Leios run (pair
+      # with NODE_IMAGE/GOV_COMMAND_ERA below).
+      PROTOCOL_VERSION: ${PROTOCOL_VERSION:-10}
       # 3 producers (2-vs-1 majority under partition) + larger k so the
       # minority's reorg over a multi-minute split stays < k. Sized from
       # observed restart cadence (~60-150s) against this genesis's
@@ -155,6 +157,9 @@ services:
       GOV: /gov-data
       GOV_STATE_DIR: /gov-state
       WORK: /work
+      # "dijkstra" for an opt-in Leios run (pair with gov-configurator's
+      # PROTOCOL_VERSION and NODE_IMAGE above).
+      GOV_COMMAND_ERA: ${GOV_COMMAND_ERA:-conway}
       NUM_DREPS: "5"
       NUM_CC: "5"
       NUM_POOLS: "3"
