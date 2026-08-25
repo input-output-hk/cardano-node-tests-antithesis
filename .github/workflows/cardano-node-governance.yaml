@@ -9,6 +9,12 @@ env:
   DURATION: 3
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "Testnet mode"
+        type: choice
+        options: [conway, leios]
+        default: conway
   schedule:
     # run once a week
     - cron: '5 1 * * 1'
@@ -48,6 +54,12 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v6
 
+    # inputs.mode only exists on a workflow_dispatch event; schedule runs
+    # have no inputs context at all, hence the fallback to "conway".
+    - name: Determine testnet mode
+      id: mode
+      run: echo "mode=${{ inputs.mode || 'conway' }}" >> "$GITHUB_OUTPUT"
+
     - name: Install Nix
       uses: cachix/install-nix-action@v31
       with:
@@ -77,6 +89,7 @@ jobs:
     # docker-compose.yaml instead of failing the run.
     - name: Fetch cardano-node master from Hydra cache
       id: node-image
+      if: steps.mode.outputs.mode == 'conway'
       continue-on-error: true
       run: |
         set -euo pipefail
@@ -103,7 +116,7 @@ jobs:
 
     - name: Pin fetched image into docker-compose.yaml
       id: pin
-      if: steps.node-image.outcome == 'success'
+      if: steps.mode.outputs.mode == 'conway' && steps.node-image.outcome == 'success'
       env:
         NEW_IMAGE: ${{ steps.node-image.outputs.image }}
       run: |
@@ -122,6 +135,33 @@ jobs:
         git checkout -b "$BRANCH"
         git add "$TESTNET/docker-compose.yaml"
         git commit -m "Pin cardano-node master (Hydra build, run ${GITHUB_RUN_ID}) for Antithesis"
+        git push origin "$BRANCH"
+        echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+    # moog clones a specific commit and runs docker-compose.yaml exactly
+    # as committed there - it has no visibility into this job's own
+    # environment, so a live NODE_IMAGE/PROTOCOL_VERSION/GOV_COMMAND_ERA
+    # env var here would never reach it. The only way to select Leios
+    # mode is to patch the ${VAR:-default} fallbacks actually committed
+    # to the file, same pattern as the Conway image pin above.
+    - name: Patch docker-compose.yaml for Leios mode
+      id: leios-patch
+      if: steps.mode.outputs.mode == 'leios'
+      run: |
+        set -euo pipefail
+        COMPOSE="$TESTNET/docker-compose.yaml"
+        sed -i \
+          -e 's|\${NODE_IMAGE:-[^}]*}|${NODE_IMAGE:-ghcr.io/input-output-hk/ouroboros-leios/cardano-node-leios:latest}|g' \
+          -e 's|\${PROTOCOL_VERSION:-10}|${PROTOCOL_VERSION:-12}|' \
+          -e 's|\${GOV_COMMAND_ERA:-conway}|${GOV_COMMAND_ERA:-dijkstra}|' \
+          "$COMPOSE"
+
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        BRANCH="antithesis/governance-leios-${GITHUB_RUN_ID}"
+        git checkout -b "$BRANCH"
+        git add "$COMPOSE"
+        git commit -m "Patch docker-compose.yaml for Leios mode (run ${GITHUB_RUN_ID})"
         git push origin "$BRANCH"
         echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
@@ -159,7 +199,7 @@ jobs:
       id: request
       run: |
         set -euo pipefail
-        COMMIT="${{ steps.pin.outputs.sha || github.sha }}"
+        COMMIT="${{ steps.leios-patch.outputs.sha || steps.pin.outputs.sha || github.sha }}"
 
         # Captured (instead of piped straight into jq) so the raw response
         # is visible in the log if it's ever shaped unexpectedly.
