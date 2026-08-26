@@ -268,10 +268,28 @@ jobs:
         OUTCOME=$(echo "$RESULT" | jq -r '.[0].value.outcome // "unknown"')
         URL=$(echo "$RESULT" | jq -r '.[0].value.url // empty')
         echo "outcome: $OUTCOME"
+
+        # Read back from the actual committed docker-compose.yaml (same
+        # file moog ran) rather than re-deriving from job context, so
+        # this reflects what really ran even if a step above was
+        # skipped or a default silently applied.
+        COMPOSE="$TESTNET/docker-compose.yaml"
+        NODE_IMG=$(grep -oP '(?<=NODE_IMAGE:-)[^}]+' "$COMPOSE" | head -1)
+        PROTOCOL_VER=$(grep -oP 'PROTOCOL_VERSION: \$\{PROTOCOL_VERSION:-\K[0-9]+' "$COMPOSE" | head -1)
+        CMD_ERA=$(grep -oP 'GOV_COMMAND_ERA: \$\{GOV_COMMAND_ERA:-\K[a-z]+' "$COMPOSE" | head -1)
+        GOV_CLI_IMG=$(grep -oP 'gov-cli@sha256:[0-9a-f]+' "$COMPOSE" | head -1)
+        GOV_CONFIGURATOR_IMG=$(grep -oP 'gov-configurator@sha256:[0-9a-f]+' "$COMPOSE" | head -1)
+
         {
           echo "### Antithesis test run"
+          echo "- mode: **${{ steps.mode.outputs.mode }}**"
           echo "- outcome: **$OUTCOME**"
           if [ -n "$URL" ]; then
             echo "- report: $URL"
           fi
+          echo "- commit: ${{ steps.leios-patch.outputs.sha || steps.pin.outputs.sha || github.sha }}"
+          echo "- node image: \`$NODE_IMG\`"
+          echo "- protocol version: $PROTOCOL_VER, command era: $CMD_ERA"
+          echo "- gov-cli: \`$GOV_CLI_IMG\`"
+          echo "- gov-configurator: \`$GOV_CONFIGURATOR_IMG\`"
         } >> "$GITHUB_STEP_SUMMARY"
