@@ -25,7 +25,7 @@ x-cardano-node: &cardano-node
   # NODE_EXTRA_ARGS (used in command: below) carries the extra CLI flags
   # a Leios node needs beyond Praos - currently just
   # "--shelley-bls-key /configs/keys/bls.skey" - empty/unset for Conway.
-  image: ${NODE_IMAGE:-ghcr.io/intersectmbo/cardano-node@sha256:007da778998d0bdb043fb834c62b9da1c95e33610f31f6f9cccab29a945e2b99}
+  image: ${NODE_IMAGE:-ghcr.io/input-output-hk/ouroboros-leios/cardano-node-leios:latest}
   environment:
     CARDANO_BLOCK_PRODUCER: true
   command: >
@@ -39,7 +39,7 @@ x-cardano-node: &cardano-node
       --shelley-vrf-key /configs/keys/vrf.skey
       --port 3001
       --host-addr 0.0.0.0
-      ${NODE_EXTRA_ARGS:-}
+      ${NODE_EXTRA_ARGS:---shelley-bls-key /configs/keys/bls.skey}
       +RTS -N -A16m -qg -qb -RTS
   restart: always
   depends_on:
@@ -60,7 +60,7 @@ services:
       NETWORK_MAGIC: "42"
       # 12 triggers the Dijkstra hard-fork for an opt-in Leios run (pair
       # with NODE_IMAGE/GOV_COMMAND_ERA below).
-      PROTOCOL_VERSION: ${PROTOCOL_VERSION:-10}
+      PROTOCOL_VERSION: ${PROTOCOL_VERSION:-12}
       # 3 producers (2-vs-1 majority under partition) + larger k so the
       # minority's reorg over a multi-minute split stays < k. Sized from
       # observed restart cadence (~60-150s) against this genesis's
@@ -119,7 +119,7 @@ services:
   relay1:
     # Same NODE_IMAGE override as the &cardano-node anchor above -
     # relay1 has its own image line since it doesn't use that anchor.
-    image: ${NODE_IMAGE:-ghcr.io/intersectmbo/cardano-node@sha256:007da778998d0bdb043fb834c62b9da1c95e33610f31f6f9cccab29a945e2b99}
+    image: ${NODE_IMAGE:-ghcr.io/input-output-hk/ouroboros-leios/cardano-node-leios:latest}
     container_name: relay1
     hostname: relay1.example
     labels:
@@ -163,7 +163,7 @@ services:
       WORK: /work
       # "dijkstra" for an opt-in Leios run (pair with gov-configurator's
       # PROTOCOL_VERSION and NODE_IMAGE above).
-      GOV_COMMAND_ERA: ${GOV_COMMAND_ERA:-conway}
+      GOV_COMMAND_ERA: ${GOV_COMMAND_ERA:-dijkstra}
       NUM_DREPS: "5"
       NUM_CC: "5"
       NUM_POOLS: "3"
