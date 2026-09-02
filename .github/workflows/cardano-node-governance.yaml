@@ -154,6 +154,7 @@ jobs:
           -e 's|\${NODE_IMAGE:-[^}]*}|${NODE_IMAGE:-ghcr.io/input-output-hk/ouroboros-leios/cardano-node-leios:latest}|g' \
           -e 's|\${PROTOCOL_VERSION:-10}|${PROTOCOL_VERSION:-12}|' \
           -e 's|\${GOV_COMMAND_ERA:-conway}|${GOV_COMMAND_ERA:-dijkstra}|' \
+          -e 's|\${NODE_EXTRA_ARGS:-}|${NODE_EXTRA_ARGS:---shelley-bls-key /configs/keys/bls.skey}|' \
           "$COMPOSE"
 
         git config user.name "github-actions[bot]"
