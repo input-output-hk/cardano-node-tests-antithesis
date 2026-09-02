@@ -150,6 +150,24 @@ STATE="${GEN_ROOT}/state-cluster0"
 [ -d "${STATE}/governance_data" ] || { echo "governance_data not generated" >&2; exit 1; }
 [ -f "${STATE}/shelley/genesis.json" ] || { echo "shelley genesis missing" >&2; exit 1; }
 
+# cardonnay's own create_pools_files (called above via "$START") already
+# has a PROTOCOL_VERSION>=12 BLS-key-gen step, but it's gated behind its
+# own has_bls_support() check, which probes THIS container's bundled
+# cardano-node - the stable release, not the Leios-patched one that
+# actually runs in p1/p2/p3 - so it always fails here and silently skips
+# BLS key generation. Key generation itself needs no Leios-specific
+# runtime, only a cardano-cli that knows the dijkstra era (stable
+# cardano-cli 11.0.1 already does), so generate it ourselves instead of
+# relying on that gate.
+if [ "$PROTOCOL_VERSION" -ge 12 ]; then
+    echo "PROTOCOL_VERSION >= 12: generating BLS keys (Leios mode)"
+    for ((i = 1; i <= NUM_POOLS; i++)); do
+        cardano-cli dijkstra node key-gen-BLS \
+            --verification-key-file "${STATE}/nodes/node-pool${i}/bls.vkey" \
+            --signing-key-file "${STATE}/nodes/node-pool${i}/bls.skey"
+    done
+fi
+
 # ---------------------------------------------------------------------
 # 4. Distribute gov-cli assets.
 # ---------------------------------------------------------------------
@@ -267,6 +285,9 @@ for ((i = 1; i <= NUM_POOLS; i++)); do
     cp "${STATE}/nodes/node-pool${i}/op.cert"  "${POOL}/keys/opcert.cert"
     cp "${STATE}/nodes/node-pool${i}/kes.skey" "${POOL}/keys/kes.skey"
     cp "${STATE}/nodes/node-pool${i}/vrf.skey" "${POOL}/keys/vrf.skey"
+    # Only present in Leios mode (see the BLS key-gen step above).
+    [ -f "${STATE}/nodes/node-pool${i}/bls.skey" ] &&
+        cp "${STATE}/nodes/node-pool${i}/bls.skey" "${POOL}/keys/bls.skey"
 done
 
 touch "$MARKER"
