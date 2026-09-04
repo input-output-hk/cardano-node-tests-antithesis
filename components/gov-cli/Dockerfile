@@ -5,6 +5,18 @@
 # Drivers use cardano-clusterlib (the standalone cardano-cli wrapper
 # library) - composer/governance-python.
 
+# Leios-patched cardano-cli, used ONLY for dijkstra-era commands (see
+# the wrapper script below) - the stable release's "dijkstra" era
+# support is a stub (just enough "node" subcommands for BLS key-gen),
+# with no query/governance/transaction support at all under that era,
+# which silently broke wait_for_node()'s tip query in Leios mode (every
+# query threw, caught by its own except: pass, so it just retried for
+# the full budget and timed out even though the node was healthy).
+# :latest, not a pinned tag, since ouroboros-leios doesn't cut stable
+# releases yet - revisit once it does.
+ARG LEIOS_NODE_IMAGE=ghcr.io/input-output-hk/ouroboros-leios/cardano-node-leios:latest
+FROM ${LEIOS_NODE_IMAGE} AS leios-cli
+
 FROM debian:bookworm-slim
 
 ARG NODE_VERSION=11.0.1
@@ -26,8 +38,18 @@ RUN curl -fsSL \
     "https://github.com/IntersectMBO/cardano-node/releases/download/${NODE_VERSION}/cardano-node-${NODE_VERSION}-linux-amd64.tar.gz" \
     -o /tmp/cardano.tar.gz && \
     tar -xzf /tmp/cardano.tar.gz -C /tmp && \
-    install -m 0755 /tmp/bin/cardano-cli /usr/local/bin/cardano-cli && \
+    install -m 0755 /tmp/bin/cardano-cli /usr/local/bin/cardano-cli-stable && \
     rm -rf /tmp/cardano.tar.gz /tmp/bin
+
+COPY --from=leios-cli /bin/cardano-cli /usr/local/bin/cardano-cli-leios
+
+# cardano_clusterlib always invokes the literal name "cardano-cli" and
+# always passes the era (conway/dijkstra) as its first argument - this
+# wrapper dispatches to the right real binary based on that, so drivers
+# need no code change to get Leios support.
+RUN printf '#!/usr/bin/env bash\nif [ "$1" = "dijkstra" ]; then\n  exec /usr/local/bin/cardano-cli-leios "$@"\nelse\n  exec /usr/local/bin/cardano-cli-stable "$@"\nfi\n' \
+    > /usr/local/bin/cardano-cli && \
+    chmod 0755 /usr/local/bin/cardano-cli
 
 # Standalone cardano-cli wrapper library used by the drivers.
 RUN python3 -m pip install --no-cache-dir --break-system-packages cardano-clusterlib
