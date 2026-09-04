@@ -150,7 +150,7 @@ services:
   # Sleeping cardano-cli container holding the governance composer
   # drivers.
   gov-cli:
-    image: ghcr.io/saratomaz/cardano-node-tests-antithesis/gov-cli@sha256:5dc82a6a3439b8b8f69da721bc27794ca62790447fdbb6d4e5f906586f2d0256
+    image: ghcr.io/saratomaz/cardano-node-tests-antithesis/gov-cli@sha256:ef68b536816614443e17144babdae857657f74264482af15c6db58c130a776b5
     container_name: gov-cli
     hostname: gov-cli.example
     labels:
