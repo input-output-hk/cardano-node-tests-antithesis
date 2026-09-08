@@ -56,14 +56,28 @@ Each logical cardano-cli operation is a separate composer driver
 6. `anytime_treasury_withdrawal_enactment` — confirms a resolved
    withdrawal's funds-receiving reward account actually settled
    correctly (and never paid out twice - see PROPERTIES.md).
-7. Remaining `anytime_` / `eventually_` / `finally_` validators.
+7. `parallel_driver_create_pparam_update` — submits a ParameterChange
+   action, chained off the ledger's own previous-action reference, only
+   ever targeting a small allowlist of parameters confirmed safe to
+   toggle repeatedly.
+8. `parallel_driver_vote_pparam_update` — casts DRep + SPO + CC votes
+   (SPOs *can* vote on this action type, unlike TreasuryWithdrawals) on
+   a pending pparam update.
+9. `anytime_pparam_update_enactment` — confirms whether a resolved
+   pparam update actually changed the targeted protocol parameter.
+10. Remaining `anytime_` / `eventually_` / `finally_` validators.
 
 InfoActions never enact, so the create/vote workload is unbounded and
 chain state never drifts — ideal under continuous fault injection.
 Treasury withdrawals are the opposite on purpose: they DO ratify and
 enact once approved, exercising the enactment/treasury-debit path the
 InfoAction workload skips, kept safe by a small (1-5 ADA) transfer
-amount per action.
+amount per action. ParameterChange actions similarly enact, exercising
+the protocol-parameter-update path instead - a genuinely different
+enactment mechanism (the ledger's live parameter set, not a one-off
+balance transfer), kept safe by a small allowlist of parameters
+confirmed not to affect fee/size math or this testnet's own hardcoded
+genesis assumptions.
 
 The drivers use the standalone `cardano-clusterlib` library.
 

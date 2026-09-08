@@ -56,8 +56,22 @@ CHAIN_VERDICT = STATE_DIR / "chain_verdict"
 # treasury withdrawal's funds-receiving target - see claim_recv_slot.
 PENDING_TREASURY_WITHDRAWALS_DIR = STATE_DIR / "pending_treasury_withdrawals"
 
+# One {txid}_{ix}.json per ParameterChange action this workload has
+# submitted and not yet resolved - see record_pending_pparam_update.
+PENDING_PPARAM_UPDATES_DIR = STATE_DIR / "pending_pparam_updates"
+
 ANCHOR_URL = "http://localhost:8080/governance.json"
 ANCHOR_TEXT = '{"body":{"title":"antithesis governance workload"}}'
+
+# ParameterChange targets: (protocol-params JSON key, cardano-cli flag,
+# [value_a, value_b]). Confirmed safe to toggle repeatedly - neither
+# affects fee/size math other drivers rely on, nor anything this
+# testnet's own genesis/config hardcodes (epoch length, security param -
+# those aren't governance-updatable pparams at all).
+PPARAM_ALLOWLIST = [
+    ("minPoolCost", "--min-pool-cost", [0, 340_000_000]),
+    ("poolRetireMaxEpoch", "--pool-retirement-epoch-interval", [19, 30]),
+]
 
 # Special-DRep targets set up by first_setup.py's _setup_special_dreps and
 # checked never to drift by anytime_govstate_invariant.py. Each entry is
@@ -69,7 +83,7 @@ SPECIAL_DREP_TARGETS = [
 
 
 def ensure_dirs() -> None:
-    for d in (WORK, STATE_DIR, PENDING_TREASURY_WITHDRAWALS_DIR):
+    for d in (WORK, STATE_DIR, PENDING_TREASURY_WITHDRAWALS_DIR, PENDING_PPARAM_UPDATES_DIR):
         d.mkdir(parents=True, exist_ok=True)
 
 
@@ -250,6 +264,42 @@ def pending_recv_slots() -> list[tuple[int, dict]]:
     return out
 
 
+# --- Pending ParameterChange tracking ---------------------------------
+#
+# Unlike a treasury withdrawal (which claims one of a small, shared pool
+# of funds-receiving addresses), a ParameterChange action doesn't
+# contend for any limited resource - each submitted action just needs
+# its own tracking record so the enactment checker can later diff the
+# specific protocol parameter it targeted. Keyed by txid#ix, so no
+# claim/lock semantics are needed here (contrast claim_recv_slot above).
+
+
+def record_pending_pparam_update(txid: str, ix: int, param_key: str, expected_value) -> None:
+    ensure_dirs()
+    path = PENDING_PPARAM_UPDATES_DIR / f"{txid}_{ix}.json"
+    path.write_text(json.dumps({"param_key": param_key, "expected_value": expected_value}))
+
+
+def pending_pparam_updates() -> list[tuple[str, int, dict]]:
+    """[(txid, ix, record)] for every currently-tracked ParameterChange submission."""
+    out: list[tuple[str, int, dict]] = []
+    if not PENDING_PPARAM_UPDATES_DIR.exists():
+        return out
+    for p in sorted(PENDING_PPARAM_UPDATES_DIR.glob("*.json")):
+        try:
+            txid, ix_str = p.stem.rsplit("_", 1)
+            out.append((txid, int(ix_str), json.loads(p.read_text())))
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
+def remove_pending_pparam_update(txid: str, ix: int) -> None:
+    path = PENDING_PPARAM_UPDATES_DIR / f"{txid}_{ix}.json"
+    with contextlib.suppress(FileNotFoundError):
+        path.unlink()
+
+
 def build_sign_submit(
     cluster: clusterlib.ClusterLib,
     name: str,
@@ -377,6 +427,38 @@ def live_treasury_withdrawal_actions(cluster: clusterlib.ClusterLib):
         ]
     except Exception:  # noqa: BLE001
         return []
+
+
+def live_pparam_update_actions(cluster: clusterlib.ClusterLib):
+    """Return the current ParameterChange proposals (each a full gov-state
+    proposal). Empty list if none or if the node can't be reached. Mirrors
+    live_treasury_withdrawal_actions - these actions leave the set once
+    ratified+enacted, not just on expiry."""
+    try:
+        proposals = cluster.g_query.get_gov_state().get("proposals", []) or []
+        return [
+            p
+            for p in proposals
+            if p.get("proposalProcedure", {}).get("govAction", {}).get("tag")
+            == "ParameterChange"
+        ]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def get_prev_pparam_action(cluster: clusterlib.ClusterLib) -> tuple[str, int]:
+    """(txid, ix) of the most recent ParameterChange action the ledger
+    knows about - every new proposal must chain off this one via
+    --prev-governance-action-tx-id/--prev-governance-action-index, or the
+    ledger rejects it outright. ("", -1) if none yet (first ever
+    ParameterChange action in this testnet's lifetime)."""
+    gov_state = cluster.g_query.get_gov_state()
+    prev = (
+        (gov_state.get("nextRatifyState") or {}).get("nextEnactState") or {}
+    ).get("prevGovActionIds", {}).get("PParamUpdate") or {}
+    txid = prev.get("txId") or ""
+    ix = prev.get("govActionIx")
+    return txid, -1 if ix is None else ix
 
 
 # --- Antithesis RNG (mirrors antithesis_rng / rng_mod in bash) -------

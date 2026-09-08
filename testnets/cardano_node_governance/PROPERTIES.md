@@ -120,6 +120,63 @@ twice.
 | `treasury_withdrawal_resolved_without_payout` | Sometimes | a withdrawal left the live set (rejected/expired) without a payout landing |
 | `treasury_withdrawal_no_overpay` | **Always** | a resolved withdrawal's reward-balance delta never exceeds the amount it transferred - catches a double payout on fault-recovery |
 
+## `parallel_driver_create_pparam_update.py` — submit one ParameterChange action
+
+Unlike the other two action types, this one is *chained*: the ledger
+tracks one "current" ParameterChange lineage at a time, and every new
+proposal must reference the previous one's txid/index
+(`helper_gov.get_prev_pparam_action`, queried live off gov-state each
+tick) or the ledger rejects it outright. This DOES ratify and enact once
+DRep+SPO+CC approval clears (SPOs *can* vote on this action type, unlike
+TreasuryWithdrawals - see the vote driver below), exercising the
+enactment path for a real protocol-parameter change. Only ever targets a
+small allowlist of parameters (`helper_gov.PPARAM_ALLOWLIST`) confirmed
+safe to toggle repeatedly - neither affects fee/size math other drivers
+rely on, nor anything this testnet's own genesis/config hardcodes.
+
+| Assertion | Type | Meaning |
+|---|---|---|
+| `create_pparam_update entered` | Reachable | driver ran |
+| `create_pparam_update_node_not_ready` | Unreachable | node never answered within the wait budget |
+| `pparam_update_created` | Sometimes (True and False variants) | coverage of both submit outcomes |
+| `gov_op_under_perturbation` (`op: create_pparam_update`) | Sometimes | a pparam update action landed while the chain was recently stalled |
+
+## `parallel_driver_vote_pparam_update.py` — cast one DRep/SPO/CC vote
+
+Same three-role roster as `parallel_driver_vote.py` - SPOs can vote on
+ParameterChange, unlike TreasuryWithdrawals.
+
+| Assertion | Type | Meaning |
+|---|---|---|
+| `vote_pparam_update entered` | Reachable | driver ran |
+| `vote_pparam_update_node_not_ready` | Unreachable | node never answered within the wait budget |
+| `pparam_update_actions_live` | Sometimes | ≥1 votable pparam update action existed in gov-state |
+| `pparam_update_vote_transient_failure` | Sometimes | a vote submit failed transiently (retried next tick) |
+| `pparam_update_vote_submitted` | Reachable | a vote was actually submitted |
+| `pparam_update_vote_recorded_<kind>` | Sometimes | that voter kind's (drep/spo/cc) vote was recorded |
+| `pparam_update_vote_decision_<yes\|no\|abstain>` | Sometimes | that decision was cast at least once |
+| `pparam_update_vote_decision_<decision>_by_<kind>` | Sometimes | that decision/voter-kind combination occurred |
+| `pparam_update_voted_by_all_roles` | Sometimes | a single action got votes from all 3 roles |
+| `pparam_update_majority_reached` | Sometimes | a single action's votes crossed the majority threshold |
+| `gov_op_under_perturbation` (`op: vote_pparam_update`) | Sometimes | a vote landed while the chain was recently stalled |
+
+## `anytime_pparam_update_enactment.py` — runs continuously, including under faults
+
+Pairs with the create driver above: confirms whether each tracked
+ParameterChange action, once it leaves the live set, actually changed
+the targeted protocol parameter. Unlike a treasury withdrawal, there's
+no overpay-style bug class here - setting a protocol parameter is
+idempotent (re-enacting the same value twice is harmless, unlike
+crediting a balance twice), so this driver only records which outcome
+happened, with no Always invariant.
+
+| Assertion | Type | Meaning |
+|---|---|---|
+| `pparam_update_enactment entered` | Reachable | checker ran |
+| `pparam_update_enactment_unavailable` | Unreachable | node didn't answer a gov-state query (absorbed, not flagged) |
+| `pparam_update_enacted_correctly` | Sometimes | a resolved action's targeted parameter matched the expected value |
+| `pparam_update_resolved_without_enactment` | Sometimes | an action left the live set (rejected/expired) without the parameter changing |
+
 ## `anytime_govstate_invariant.py` — runs continuously, including under faults
 
 | Assertion | Type | Meaning |
