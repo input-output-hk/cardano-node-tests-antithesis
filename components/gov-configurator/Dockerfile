@@ -9,8 +9,13 @@
 
 FROM debian:bookworm-slim
 
-# Pin cardonnay (cardano-node-tests tracks >=0.4.4,<0.5.0).
-ARG CARDONNAY_VERSION=0.4.4
+# Pin cardonnay (cardano-node-tests tracks >=0.4.4,<0.5.0). 0.4.6 fixes
+# a Dijkstra-genesis gap (missing minPoolMargin + several other newly-
+# required Leios-era pparams) that broke every Leios-mode node boot
+# once ghcr.io/input-output-hk/ouroboros-leios/cardano-node-leios:latest
+# picked up a leios-prototype update expecting them - see
+# IntersectMBO/cardonnay#161, released as 0.4.6 on 2026-09-07.
+ARG CARDONNAY_VERSION=0.4.6
 ARG NODE_VERSION=11.0.1
 
 ENV TZ=UTC
