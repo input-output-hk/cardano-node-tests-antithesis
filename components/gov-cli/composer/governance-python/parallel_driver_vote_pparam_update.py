@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
-"""parallel_driver_vote_pparam_update.py — cast one DRep/SPO/CC vote on
-one live ParameterChange action.
+"""parallel_driver_vote_pparam_update.py — cast one DRep/CC vote on one
+live ParameterChange action.
 
-Same shape as parallel_driver_vote.py, restricted to ParameterChange
-proposals - SPOs CAN vote on this action type (unlike TreasuryWithdrawals,
-see parallel_driver_vote_treasury_withdrawal.py), so the full three-role
-roster applies.
+Same shape as parallel_driver_vote_treasury_withdrawal.py, restricted to
+DRep and CC voters. SPO voting eligibility on a ParameterChange action
+depends on whether the targeted parameters fall in Conway's
+security-relevant group (fee/size params etc.) - confirmed by a real
+ledger rejection (`ConwayGovFailure (DisallowedVoters (StakePoolVoter
+...))`) when this driver used to include SPOs. helper_gov.PPARAM_ALLOWLIST
+deliberately targets only non-security-group parameters (see its own
+docstring), so an SPO vote on any action this driver casts against is
+unconditionally rejected - SPOs are left out of the roster rather than
+submitted and expected to fail every time.
 
 Stateless: the votable set comes straight from the chain via an N2C
 gov-state query (relay1 is fault-excluded, so the query answers even
@@ -25,19 +31,14 @@ from cardano_clusterlib import clusterlib
 
 
 def build_voters(cluster: clusterlib.ClusterLib):
-    """Build the voter roster: every DRep, SPO and CC member. Each entry
-    is (kind, create_fn, vkey_kw, vkey_file, skey_file)."""
+    """Build the voter roster: every DRep and CC member (no SPOs - see
+    module docstring). Each entry is (kind, create_fn, vkey_kw, vkey_file, skey_file)."""
     voters = []
     for i in range(1, g.NUM_DREPS + 1):
         vkey = g.GD / f"default_drep_{i}_drep.vkey"
         skey = g.GD / f"default_drep_{i}_drep.skey"
         if vkey.exists():
             voters.append(("drep", cluster.g_governance.vote.create_drep, "drep_vkey_file", vkey, skey))
-    for i in range(1, g.NUM_POOLS + 1):
-        vkey = g.GOV / "pools" / f"node-pool{i}" / "cold.vkey"
-        skey = g.GOV / "pools" / f"node-pool{i}" / "cold.skey"
-        if vkey.exists():
-            voters.append(("spo", cluster.g_governance.vote.create_spo, "cold_vkey_file", vkey, skey))
     for i in range(1, g.NUM_CC + 1):
         vkey = g.GD / f"cc_member{i}_committee_hot.vkey"
         skey = g.GD / f"cc_member{i}_committee_hot.skey"
@@ -117,14 +118,14 @@ def main() -> int:
             return 0
         sdk.reachable("pparam_update_vote_submitted")
 
-        drep_n = spo_n = cc_n = 0
+        drep_n = cc_n = 0
         try:
             prop = g.lookup_proposal(cluster.g_query.get_gov_state(), txid) or {}
-            drep_n, spo_n, cc_n = g.vote_counts(prop)
+            drep_n, _spo_n, cc_n = g.vote_counts(prop)
         except Exception:  # noqa: BLE001
             pass
-        total = drep_n + spo_n + cc_n
-        majority = (g.NUM_DREPS + g.NUM_POOLS + g.NUM_CC + 1) // 2
+        total = drep_n + cc_n
+        majority = (g.NUM_DREPS + g.NUM_CC + 1) // 2
 
         sdk.sometimes(total >= 1, f"pparam_update_vote_recorded_{kind}")
         sdk.sometimes(True, f"pparam_update_vote_decision_{decision}")
@@ -134,11 +135,11 @@ def main() -> int:
             {"voter": kind, "decision": decision},
         )
 
-        all_roles = drep_n >= 1 and spo_n >= 1 and cc_n >= 1
+        all_roles = drep_n >= 1 and cc_n >= 1
         sdk.sometimes(
             all_roles,
-            "pparam_update_voted_by_all_roles",
-            {"drep": drep_n, "spo": spo_n, "cc": cc_n},
+            "pparam_update_voted_by_drep_and_cc",
+            {"drep": drep_n, "cc": cc_n},
         )
         sdk.sometimes(
             total >= majority,

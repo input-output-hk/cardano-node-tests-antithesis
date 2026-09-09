@@ -141,10 +141,18 @@ rely on, nor anything this testnet's own genesis/config hardcodes.
 | `pparam_update_created` | Sometimes (True and False variants) | coverage of both submit outcomes |
 | `gov_op_under_perturbation` (`op: create_pparam_update`) | Sometimes | a pparam update action landed while the chain was recently stalled |
 
-## `parallel_driver_vote_pparam_update.py` — cast one DRep/SPO/CC vote
+## `parallel_driver_vote_pparam_update.py` — cast one DRep/CC vote
 
-Same three-role roster as `parallel_driver_vote.py` - SPOs can vote on
-ParameterChange, unlike TreasuryWithdrawals.
+Restricted to DRep and CC voters, same as
+`parallel_driver_vote_treasury_withdrawal.py` — but for a different
+reason. SPO voting eligibility on a ParameterChange action depends on
+whether the targeted parameters fall in Conway's security-relevant
+group; a real ledger rejection (`ConwayGovFailure (DisallowedVoters
+(StakePoolVoter ...))`) confirmed this driver's SPO votes were
+unconditionally rejected, since `helper_gov.PPARAM_ALLOWLIST`
+deliberately targets only non-security-group parameters. SPOs are left
+out of the roster rather than submitted and expected to fail every
+time.
 
 | Assertion | Type | Meaning |
 |---|---|---|
@@ -153,10 +161,10 @@ ParameterChange, unlike TreasuryWithdrawals.
 | `pparam_update_actions_live` | Sometimes | ≥1 votable pparam update action existed in gov-state |
 | `pparam_update_vote_transient_failure` | Sometimes | a vote submit failed transiently (retried next tick) |
 | `pparam_update_vote_submitted` | Reachable | a vote was actually submitted |
-| `pparam_update_vote_recorded_<kind>` | Sometimes | that voter kind's (drep/spo/cc) vote was recorded |
+| `pparam_update_vote_recorded_<kind>` | Sometimes | that voter kind's (drep/cc) vote was recorded |
 | `pparam_update_vote_decision_<yes\|no\|abstain>` | Sometimes | that decision was cast at least once |
 | `pparam_update_vote_decision_<decision>_by_<kind>` | Sometimes | that decision/voter-kind combination occurred |
-| `pparam_update_voted_by_all_roles` | Sometimes | a single action got votes from all 3 roles |
+| `pparam_update_voted_by_drep_and_cc` | Sometimes | a single action got votes from both roles |
 | `pparam_update_majority_reached` | Sometimes | a single action's votes crossed the majority threshold |
 | `gov_op_under_perturbation` (`op: vote_pparam_update`) | Sometimes | a vote landed while the chain was recently stalled |
 

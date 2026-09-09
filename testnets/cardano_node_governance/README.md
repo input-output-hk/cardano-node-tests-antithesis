@@ -60,9 +60,12 @@ Each logical cardano-cli operation is a separate composer driver
    action, chained off the ledger's own previous-action reference, only
    ever targeting a small allowlist of parameters confirmed safe to
    toggle repeatedly.
-8. `parallel_driver_vote_pparam_update` — casts DRep + SPO + CC votes
-   (SPOs *can* vote on this action type, unlike TreasuryWithdrawals) on
-   a pending pparam update.
+8. `parallel_driver_vote_pparam_update` — casts DRep + CC votes (SPO
+   eligibility on ParameterChange depends on whether the targeted
+   parameters fall in Conway's security-relevant group; the allowlist
+   here deliberately doesn't, and a real ledger rejection confirmed SPO
+   votes are unconditionally disallowed for it) on a pending pparam
+   update.
 9. `anytime_pparam_update_enactment` — confirms whether a resolved
    pparam update actually changed the targeted protocol parameter.
 10. Remaining `anytime_` / `eventually_` / `finally_` validators.
