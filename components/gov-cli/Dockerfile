@@ -12,9 +12,15 @@
 # which silently broke wait_for_node()'s tip query in Leios mode (every
 # query threw, caught by its own except: pass, so it just retried for
 # the full budget and timed out even though the node was healthy).
-# :latest, not a pinned tag, since ouroboros-leios doesn't cut stable
-# releases yet - revisit once it does.
-ARG LEIOS_NODE_IMAGE=ghcr.io/input-output-hk/ouroboros-leios/cardano-node-leios:latest
+# Pinned to a digest, not :latest - ouroboros-leios doesn't cut stable
+# releases yet and rebuilds :latest on every push to its main branch,
+# which has already broken Leios mode twice (missing genesis fields,
+# then a BLS TextEnvelope tag mismatch between cardano-cli and
+# cardano-node built from different commits of that moving tag).
+# Pinned digest is confirmed self-consistent (own cardano-cli's BLS key
+# accepted by own cardano-node); bump deliberately, not automatically,
+# once ouroboros-leios cuts an actual stable release.
+ARG LEIOS_NODE_IMAGE=ghcr.io/input-output-hk/ouroboros-leios/cardano-node-leios@sha256:4fe269cfb2a7f61605ed4c77aea5a82af8dd89d1df4ee82e08d4f47d9e46a66e
 FROM ${LEIOS_NODE_IMAGE} AS leios-cli
 
 FROM debian:bookworm-slim

@@ -11,9 +11,17 @@ on:
   workflow_dispatch:
     inputs:
       mode:
+        # leios: pinned to a digest confirmed self-consistent (own
+        # cardano-cli's BLS key accepted by own cardano-node) - stable
+        # baseline for verifying our own drivers/config changes.
+        # leios-latest: tracks :latest, i.e. whatever ouroboros-leios's
+        # main branch currently builds - genuinely probes upstream's
+        # bleeding edge, at the cost of setup-phase breaks unrelated to
+        # our own drivers (already hit twice: a genesis-field gap, then
+        # a BLS key-tag mismatch from the tag drifting between builds).
         description: "Testnet mode"
         type: choice
-        options: [conway, leios]
+        options: [conway, leios, leios-latest]
         default: conway
   schedule:
     # run once a week
@@ -144,14 +152,25 @@ jobs:
     # env var here would never reach it. The only way to select Leios
     # mode is to patch the ${VAR:-default} fallbacks actually committed
     # to the file, same pattern as the Conway image pin above.
+    #
+    # leios uses a digest pinned to what components/gov-cli/Dockerfile's
+    # LEIOS_NODE_IMAGE bundled at last build (kept in sync so the
+    # driver-generated BLS key and the node parsing it come from the
+    # same build); leios-latest tracks :latest instead, to deliberately
+    # probe upstream's current main branch.
     - name: Patch docker-compose.yaml for Leios mode
       id: leios-patch
-      if: steps.mode.outputs.mode == 'leios'
+      if: steps.mode.outputs.mode == 'leios' || steps.mode.outputs.mode == 'leios-latest'
+      env:
+        LEIOS_NODE_IMAGE: >-
+          ${{ steps.mode.outputs.mode == 'leios-latest'
+              && 'ghcr.io/input-output-hk/ouroboros-leios/cardano-node-leios:latest'
+              || 'ghcr.io/input-output-hk/ouroboros-leios/cardano-node-leios@sha256:4fe269cfb2a7f61605ed4c77aea5a82af8dd89d1df4ee82e08d4f47d9e46a66e' }}
       run: |
         set -euo pipefail
         COMPOSE="$TESTNET/docker-compose.yaml"
         sed -i \
-          -e 's|\${NODE_IMAGE:-[^}]*}|${NODE_IMAGE:-ghcr.io/input-output-hk/ouroboros-leios/cardano-node-leios:latest}|g' \
+          -e "s|\${NODE_IMAGE:-[^}]*}|\${NODE_IMAGE:-${LEIOS_NODE_IMAGE}}|g" \
           -e 's|\${PROTOCOL_VERSION:-10}|${PROTOCOL_VERSION:-12}|' \
           -e 's|\${GOV_COMMAND_ERA:-conway}|${GOV_COMMAND_ERA:-dijkstra}|' \
           -e 's|\${NODE_EXTRA_ARGS:-}|${NODE_EXTRA_ARGS:---shelley-bls-key /configs/keys/bls.skey}|' \
@@ -159,10 +178,10 @@ jobs:
 
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-        BRANCH="antithesis/governance-leios-${GITHUB_RUN_ID}"
+        BRANCH="antithesis/governance-${{ steps.mode.outputs.mode }}-${GITHUB_RUN_ID}"
         git checkout -b "$BRANCH"
         git add "$COMPOSE"
-        git commit -m "Patch docker-compose.yaml for Leios mode (run ${GITHUB_RUN_ID})"
+        git commit -m "Patch docker-compose.yaml for ${{ steps.mode.outputs.mode }} mode (run ${GITHUB_RUN_ID})"
         git push origin "$BRANCH"
         echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
