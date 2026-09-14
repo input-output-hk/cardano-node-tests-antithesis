@@ -62,14 +62,23 @@ def main() -> int:
             sdk.unreachable("vote_node_not_ready")
             return 0
 
-        # Pull the live InfoAction set from gov-state and RNG-select one.
+        # Pull the live InfoAction set from gov-state. InfoActions never
+        # enact, only expire, so the live set grows unbounded over a run;
+        # picking uniformly across all of it spreads votes too thin for
+        # any single action to ever accumulate a majority before it
+        # expires (confirmed in a real 3h run - action_majority_reached
+        # never hit once). Bias toward the soonest-to-expire actions
+        # instead, so votes concentrate on a small rotating set rather
+        # than the whole ever-growing pool.
         props = g.live_info_actions(cluster)
         sdk.sometimes(len(props) >= 1, "actions_live", {"live": len(props)})
         if not props:
             print("no live actions in gov-state", file=sys.stderr)
             return 0
 
-        pick = props[g.rng_mod(len(props))]
+        props.sort(key=lambda p: p.get("expiresAfter", 0))
+        candidates = props[:3]
+        pick = candidates[g.rng_mod(len(candidates))]
         txid = pick["actionId"]["txId"]
         ix = pick["actionId"]["govActionIx"]
 
