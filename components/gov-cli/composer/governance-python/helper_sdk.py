@@ -32,6 +32,7 @@ def _assert(
     assert_type: str,
     condition: bool,
     details: dict | None = None,
+    must_hit: bool = True,
 ) -> None:
     _emit(
         {
@@ -41,7 +42,7 @@ def _assert(
                 "condition": bool(condition),
                 "display_type": display_type,
                 "hit": True,
-                "must_hit": True,
+                "must_hit": must_hit,
                 "assert_type": assert_type,
                 "location": {
                     "file": "",
@@ -64,8 +65,15 @@ def unreachable(assert_id: str) -> None:
     _assert(assert_id, "AlwaysOrUnreachable", "always", False)
 
 
-def sometimes(condition: bool, assert_id: str, details: dict | None = None) -> None:
-    _assert(assert_id, "Sometimes", "sometimes", condition, details)
+def sometimes(
+    condition: bool, assert_id: str, details: dict | None = None, must_hit: bool = True
+) -> None:
+    """must_hit=False records the check (still visible in reports) without
+    the platform flagging a run as failed if it's never true - for a
+    property that's observational rather than a real invariant (e.g. one
+    that's only reachable given more elapsed time than a hard external
+    duration cap allows)."""
+    _assert(assert_id, "Sometimes", "sometimes", condition, details, must_hit=must_hit)
 
 
 def always(condition: bool, assert_id: str, details: dict | None = None) -> None:

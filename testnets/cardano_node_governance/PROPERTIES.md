@@ -194,7 +194,7 @@ happened, with no Always invariant.
 | `govstate_well_formed` | **Always** | gov-state always parses and exposes a `proposals` array |
 | `committee_quorum_maintained` | **Always** | authorized CC members never drop below `committeeMinSize` (2), even under fault injection |
 | `special_drep_<name>_delegation_stable` | **Always** | the always-abstain/always-no-confidence delegations never drift once on-chain |
-| `action_near_expiry` | Sometimes | an action reached its final epoch before expiry (lifecycle coverage) |
+| `action_near_expiry` | Sometimes (not required) | an action reached its final epoch before expiry (lifecycle coverage) - see note below |
 
 ## `anytime_chain_progress.py` — the perturbation witness, runs continuously
 
@@ -247,6 +247,16 @@ are checked with enough propagation lag under fault injection that
 demanding they hold on every single check would produce false-positive
 failures on healthy runs (`vote_recorded_<kind>`). None of these should
 become `always`.
+
+`action_near_expiry` is marked `must_hit=False` (recorded, but never fails
+a run on its own): with `govActionLifetime=2` (cardonnay's default, shared
+with `TreasuryWithdrawals`/`ParameterChange` so not something to shrink
+just for this one property) and moog's `DURATION` hard-capped at 3h, an
+action created right after `first_setup`'s 1-epoch wait only reaches its
+`expiresAfter` epoch at epoch 4 - never reached within the ~3.6-epoch
+budget a 3h run allows. That's a real timing-budget ceiling, not a driver
+bug, so treating it as a required hit would just fail every run forever
+regardless of what the drivers do.
 
 The properties that genuinely are invariants - must hold on every check,
 no exceptions - are the **Always** ones: `govstate_well_formed`,
