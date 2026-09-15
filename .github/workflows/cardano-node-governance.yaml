@@ -153,11 +153,13 @@ jobs:
     # mode is to patch the ${VAR:-default} fallbacks actually committed
     # to the file, same pattern as the Conway image pin above.
     #
-    # leios uses a digest pinned to what components/gov-cli/Dockerfile's
-    # LEIOS_NODE_IMAGE bundled at last build (kept in sync so the
-    # driver-generated BLS key and the node parsing it come from the
-    # same build); leios-latest tracks :latest instead, to deliberately
-    # probe upstream's current main branch.
+    # leios uses our own self-built image, produced by
+    # scripts/build-leios-node-image.sh from the same pinned
+    # IntersectMBO/cardano-node commit as components/gov-cli/Dockerfile's
+    # LEIOS_NODE_REV, so node and the driver-generated BLS key can never
+    # drift apart; leios-latest instead tracks the third-party
+    # ouroboros-leios :latest tag, to deliberately probe upstream's
+    # current main branch.
     - name: Patch docker-compose.yaml for Leios mode
       id: leios-patch
       if: steps.mode.outputs.mode == 'leios' || steps.mode.outputs.mode == 'leios-latest'
@@ -165,7 +167,7 @@ jobs:
         LEIOS_NODE_IMAGE: >-
           ${{ steps.mode.outputs.mode == 'leios-latest'
               && 'ghcr.io/input-output-hk/ouroboros-leios/cardano-node-leios:latest'
-              || 'ghcr.io/input-output-hk/ouroboros-leios/cardano-node-leios@sha256:4fe269cfb2a7f61605ed4c77aea5a82af8dd89d1df4ee82e08d4f47d9e46a66e' }}
+              || 'ghcr.io/saratomaz/cardano-node-tests-antithesis/cardano-node-leios@sha256:3a88c4544247839b23c258412bad0ea4ddfe21c30a43c93968a93e3e7cc15b17' }}
       run: |
         set -euo pipefail
         COMPOSE="$TESTNET/docker-compose.yaml"

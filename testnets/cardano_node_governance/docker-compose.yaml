@@ -18,10 +18,13 @@
 # (first_) plus parallel create/vote drivers.
 
 x-cardano-node: &cardano-node
-  # NODE_IMAGE overrides for an opt-in Leios/Dijkstra node (e.g.
-  # ghcr.io/input-output-hk/ouroboros-leios/cardano-node-leios); the
-  # embedded default digest is what CI's "Pin fetched image" step
-  # rewrites on every run for the default Praos/Conway mode.
+  # NODE_IMAGE overrides for an opt-in Leios/Dijkstra node - normally our
+  # own self-built ghcr.io/saratomaz/.../cardano-node-leios (see
+  # scripts/build-leios-node-image.sh), or the third-party
+  # ghcr.io/input-output-hk/ouroboros-leios/cardano-node-leios:latest for
+  # leios-latest mode. The embedded default digest is what CI's "Pin
+  # fetched image" step rewrites on every run for the default
+  # Praos/Conway mode.
   # NODE_EXTRA_ARGS (used in command: below) carries the extra CLI flags
   # a Leios node needs beyond Praos - currently just
   # "--shelley-bls-key /configs/keys/bls.skey" - empty/unset for Conway.
