@@ -12,16 +12,29 @@
 # which silently broke wait_for_node()'s tip query in Leios mode (every
 # query threw, caught by its own except: pass, so it just retried for
 # the full budget and timed out even though the node was healthy).
-# Pinned to a digest, not :latest - ouroboros-leios doesn't cut stable
-# releases yet and rebuilds :latest on every push to its main branch,
-# which has already broken Leios mode twice (missing genesis fields,
-# then a BLS TextEnvelope tag mismatch between cardano-cli and
-# cardano-node built from different commits of that moving tag).
-# Pinned digest is confirmed self-consistent (own cardano-cli's BLS key
-# accepted by own cardano-node); bump deliberately, not automatically,
-# once ouroboros-leios cuts an actual stable release.
-ARG LEIOS_NODE_IMAGE=ghcr.io/input-output-hk/ouroboros-leios/cardano-node-leios@sha256:4fe269cfb2a7f61605ed4c77aea5a82af8dd89d1df4ee82e08d4f47d9e46a66e
-FROM ${LEIOS_NODE_IMAGE} AS leios-cli
+#
+# Built ourselves via Nix from a pinned IntersectMBO/cardano-node commit,
+# rather than extracted from a third-party image - the same commit
+# NODE_IMAGE is built from (see docker-compose.yaml), so cli and node can
+# never drift apart again (previously caused a BLS TextEnvelope tag
+# mismatch between a cli/node pulled from different builds of a moving
+# :latest tag). cardano-cli has no dockerImage flake output, so its
+# runtime closure (glibc, libsodium, gmp, ...) is copied alongside the
+# binary rather than just the binary itself.
+FROM nixos/nix:2.24.9 AS leios-cli-builder
+RUN printf 'experimental-features = nix-command flakes\nextra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=\nextra-substituters = https://cache.iog.io/\n' \
+    >> /etc/nix/nix.conf
+
+# Keep in sync with docker-compose.yaml's NODE_IMAGE Leios-mode pin -
+# both must come from the same commit.
+ARG LEIOS_NODE_REV=6a540bd43a83e697fd662b973f7e99cee02a59fb
+
+RUN CLI_OUT=$(nix build --accept-flake-config --no-write-lock-file --no-link --print-out-paths \
+        "github:IntersectMBO/cardano-node?ref=${LEIOS_NODE_REV}#cardano-cli") && \
+    mkdir -p /out/nix/store && \
+    nix-store --query --requisites "${CLI_OUT}" > /tmp/closure.txt && \
+    while read -r p; do cp -a "$p" /out/nix/store/; done < /tmp/closure.txt && \
+    ln -s "${CLI_OUT}/bin/cardano-cli" /out/cardano-cli-leios
 
 FROM debian:bookworm-slim
 
@@ -47,7 +60,8 @@ RUN curl -fsSL \
     install -m 0755 /tmp/bin/cardano-cli /usr/local/bin/cardano-cli-stable && \
     rm -rf /tmp/cardano.tar.gz /tmp/bin
 
-COPY --from=leios-cli /bin/cardano-cli /usr/local/bin/cardano-cli-leios
+COPY --from=leios-cli-builder /out/nix/store /nix/store
+COPY --from=leios-cli-builder /out/cardano-cli-leios /usr/local/bin/cardano-cli-leios
 
 # cardano_clusterlib always invokes the literal name "cardano-cli" and
 # always passes the era (conway/dijkstra) as its first argument - this
