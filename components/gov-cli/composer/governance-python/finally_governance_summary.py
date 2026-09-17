@@ -8,8 +8,6 @@ fault delivers SIGTERM mid-run.
 
 from __future__ import annotations
 
-import sys
-
 import helper_sdk as sdk
 
 
@@ -20,11 +18,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    try:
-        main()
-        sdk.always(True, "finally_governance_summary_exits_zero")
-    except Exception as exc:  # noqa: BLE001
-        print(f"finally_governance_summary aborted: {exc}", file=sys.stderr)
-        sdk.unreachable("finally_governance_summary_aborted")
-    finally:
-        sys.exit(0)
+    sdk.run_driver(
+        main, "finally_governance_summary_aborted", "finally_governance_summary_exits_zero"
+    )
