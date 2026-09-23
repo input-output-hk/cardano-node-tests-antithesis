@@ -55,6 +55,19 @@ See [`testnets/cardano_node_governance/README.md`](testnets/cardano_node_governa
 - Docker and Docker Compose v2
 - Access to pull images from `ghcr.io/intersectmbo` and `ghcr.io/cardano-foundation`
 
+## Upstreams
+
+Two Cardano Foundation repos are load-bearing here but appear only as a workflow flag and as image
+paths, so they're easy to miss:
+
+- [cardano-foundation/moog](https://github.com/cardano-foundation/moog) — the CLI that submits and
+  polls Antithesis test runs. Pinned in `.github/workflows/cardano-node-governance.yaml`; see the
+  comment there for why not `latest`.
+- [cardano-foundation/cardano-node-antithesis](https://github.com/cardano-foundation/cardano-node-antithesis)
+  — source for the `sidecar`, `tracer-sidecar` and `log-tailer` images this testnet reuses. The
+  consensus-safety properties in the Antithesis report that aren't in `PROPERTIES.md` (e.g.
+  `cluster fork depth < k`) come from there, not from this repo.
+
 ## Running locally
 
 From the testnet directory:
