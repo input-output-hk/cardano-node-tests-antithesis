@@ -127,12 +127,15 @@ tracks one "current" ParameterChange lineage at a time, and every new
 proposal must reference the previous one's txid/index
 (`helper_gov.get_prev_pparam_action`, queried live off gov-state each
 tick) or the ledger rejects it outright. This DOES ratify and enact once
-DRep+SPO+CC approval clears (SPOs *can* vote on this action type, unlike
-TreasuryWithdrawals - see the vote driver below), exercising the
-enactment path for a real protocol-parameter change. Only ever targets a
-small allowlist of parameters (`helper_gov.PPARAM_ALLOWLIST`) confirmed
-safe to toggle repeatedly - neither affects fee/size math other drivers
-rely on, nor anything this testnet's own genesis/config hardcodes.
+DRep+CC approval clears, exercising the enactment path for a real
+protocol-parameter change. SPOs are not in the roster: their eligibility
+depends on whether the targeted parameters fall in Conway's
+security-relevant group, and the allowlist below stays out of it, so an
+SPO vote here is rejected outright (see the vote driver). Only ever
+targets a small allowlist of parameters
+(`helper_gov.PPARAM_ALLOWLIST`) confirmed safe to toggle repeatedly -
+neither affects fee/size math other drivers rely on, nor anything this
+testnet's own genesis/config hardcodes.
 
 | Assertion | Type | Meaning |
 |---|---|---|
