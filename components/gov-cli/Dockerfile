@@ -39,6 +39,7 @@ RUN CLI_OUT=$(nix build --accept-flake-config --no-write-lock-file --no-link --p
 FROM debian:bookworm-slim
 
 ARG NODE_VERSION=11.0.1
+ARG CLUSTERLIB_VERSION=0.10.5
 
 ENV TZ=UTC
 RUN ln -snf /usr/share/zoneinfo/${TZ} /etc/localtime && echo ${TZ} > /etc/timezone
@@ -71,8 +72,11 @@ RUN printf '#!/usr/bin/env bash\nif [ "$1" = "dijkstra" ]; then\n  exec /usr/loc
     > /usr/local/bin/cardano-cli && \
     chmod 0755 /usr/local/bin/cardano-cli
 
-# Standalone cardano-cli wrapper library used by the drivers.
-RUN python3 -m pip install --no-cache-dir --break-system-packages cardano-clusterlib
+# Standalone cardano-cli wrapper library used by the drivers. Pinned so a
+# rebuild triggered by an unrelated components/ change can't silently bump
+# it - bump this deliberately, like CARDONNAY_VERSION in gov-configurator.
+RUN python3 -m pip install --no-cache-dir --break-system-packages \
+        "cardano-clusterlib==${CLUSTERLIB_VERSION}"
 
 # Becomes the live composer template at /opt/antithesis/test/v1/governance.
 COPY composer/governance-python /opt/antithesis/test/v1/governance
