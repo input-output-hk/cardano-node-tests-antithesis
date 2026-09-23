@@ -4,7 +4,7 @@
 `helper_`-prefixed: ignored by the Antithesis composer scheduler.
 Wraps the standalone `cardano-clusterlib` library (which itself wraps
 cardano-cli) — NOT the cardano-node-tests harness. The governance
-assets are produced by the gov-configurator (cardonnay's conway_fast
+assets are produced by the gov-configurator (cardonnay's local_fast
 genesis + governance_data) and mounted at $GOV; the cluster's network
 parameters come from the genesis state dir at $GOV_STATE_DIR.
 """
