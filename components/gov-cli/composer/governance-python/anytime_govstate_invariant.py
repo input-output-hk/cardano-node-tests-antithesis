@@ -32,7 +32,9 @@ def main() -> int:
         try:
             authorized = g.count_active_committee_members(cluster)
             # committeeMinSize is 2 in the seeded Conway genesis.
-            sdk.always(authorized >= 2, "committee_quorum_maintained", {"authorized": authorized, "min": 2})
+            sdk.always(
+                authorized >= 2, "committee_quorum_maintained", {"authorized": authorized, "min": 2}
+            )
         except Exception:  # noqa: BLE001
             pass
 
@@ -72,11 +74,7 @@ def main() -> int:
     # bug, so it's recorded as observational rather than a required hit.
     try:
         ep = cluster.g_query.get_epoch()
-        near = sum(
-            1
-            for p in (gov_state.get("proposals", []) or [])
-            if p.get("expiresAfter") == ep
-        )
+        near = sum(1 for p in (gov_state.get("proposals", []) or []) if p.get("expiresAfter") == ep)
         sdk.sometimes(near >= 1, "action_near_expiry", {"near": near, "epoch": ep}, must_hit=False)
     except Exception:  # noqa: BLE001
         pass

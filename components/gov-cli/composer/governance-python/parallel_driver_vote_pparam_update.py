@@ -38,12 +38,16 @@ def build_voters(cluster: clusterlib.ClusterLib):
         vkey = g.GD / f"default_drep_{i}_drep.vkey"
         skey = g.GD / f"default_drep_{i}_drep.skey"
         if vkey.exists():
-            voters.append(("drep", cluster.g_governance.vote.create_drep, "drep_vkey_file", vkey, skey))
+            voters.append(
+                ("drep", cluster.g_governance.vote.create_drep, "drep_vkey_file", vkey, skey)
+            )
     for i in range(1, g.NUM_CC + 1):
         vkey = g.GD / f"cc_member{i}_committee_hot.vkey"
         skey = g.GD / f"cc_member{i}_committee_hot.skey"
         if vkey.exists():
-            voters.append(("cc", cluster.g_governance.vote.create_committee, "cc_hot_vkey_file", vkey, skey))
+            voters.append(
+                ("cc", cluster.g_governance.vote.create_committee, "cc_hot_vkey_file", vkey, skey)
+            )
     return voters
 
 
@@ -148,7 +152,9 @@ def main() -> int:
         )
 
         if g.recent_stall(cluster):
-            sdk.sometimes(True, "gov_op_under_perturbation", {"op": "vote_pparam_update", "voter": kind})
+            sdk.sometimes(
+                True, "gov_op_under_perturbation", {"op": "vote_pparam_update", "voter": kind}
+            )
 
         print(
             f"pparam update vote submitted ({kind} {decision}; action now has {total} votes)",

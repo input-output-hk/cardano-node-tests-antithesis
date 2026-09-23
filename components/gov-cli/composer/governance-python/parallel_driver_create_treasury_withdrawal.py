@@ -134,12 +134,15 @@ def main() -> int:
             completed = True
 
             print(
-                f"treasury withdrawal created: {txid} (transfer_amt={transfer_amt})", file=sys.stderr
+                f"treasury withdrawal created: {txid} (transfer_amt={transfer_amt})",
+                file=sys.stderr,
             )
             sdk.sometimes(True, "treasury_withdrawal_created", {"transfer_amt": transfer_amt})
 
             if g.recent_stall(cluster):
-                sdk.sometimes(True, "gov_op_under_perturbation", {"op": "create_treasury_withdrawal"})
+                sdk.sometimes(
+                    True, "gov_op_under_perturbation", {"op": "create_treasury_withdrawal"}
+                )
             return 0
         finally:
             if not completed:
@@ -149,4 +152,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sdk.run_driver(main, "create_treasury_withdrawal_aborted", "create_treasury_withdrawal_exits_zero")
+    sdk.run_driver(
+        main, "create_treasury_withdrawal_aborted", "create_treasury_withdrawal_exits_zero"
+    )

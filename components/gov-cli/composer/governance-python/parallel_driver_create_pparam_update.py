@@ -55,7 +55,9 @@ def main() -> int:
         try:
             prev_txid, prev_ix = g.get_prev_pparam_action(cluster)
         except Exception as exc:  # noqa: BLE001
-            print(f"could not query prev ParameterChange action: {exc} (will retry)", file=sys.stderr)
+            print(
+                f"could not query prev ParameterChange action: {exc} (will retry)", file=sys.stderr
+            )
             return 0
 
         tok = g.unique_token()
@@ -95,9 +97,7 @@ def main() -> int:
 
         g.record_pending_pparam_update(txid, 0, param_key, value)
 
-        print(
-            f"pparam update created: {txid} ({param_key}={value})", file=sys.stderr
-        )
+        print(f"pparam update created: {txid} ({param_key}={value})", file=sys.stderr)
         sdk.sometimes(True, "pparam_update_created", {"param": param_key, "value": value})
 
         if g.recent_stall(cluster):

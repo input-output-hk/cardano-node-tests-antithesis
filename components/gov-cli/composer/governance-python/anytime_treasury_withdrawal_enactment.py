@@ -96,4 +96,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sdk.run_driver(main, "treasury_withdrawal_enactment_aborted", "treasury_withdrawal_enactment_exits_zero")
+    sdk.run_driver(
+        main, "treasury_withdrawal_enactment_aborted", "treasury_withdrawal_enactment_exits_zero"
+    )

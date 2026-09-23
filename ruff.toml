@@ -1,0 +1,9 @@
+# Formatting for the Python drivers.
+#   nix shell nixpkgs#ruff -c ruff format .
+# Also runs automatically on edited drivers, via the PostToolUse hook in
+# .claude/settings.json.
+line-length = 100
+
+# Only the drivers. Without this, ruff also walks the Markdown docs and
+# reformats Python code blocks embedded in them.
+include = ["components/gov-cli/composer/governance-python/*.py"]

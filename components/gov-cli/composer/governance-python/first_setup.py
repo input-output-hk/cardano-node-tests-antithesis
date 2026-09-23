@@ -118,9 +118,7 @@ def _confirm_special_dreps(cluster: clusterlib.ClusterLib, addrs: dict[str, str]
             continue
         try:
             matches, actual = g.check_vote_delegation(cluster, addr, expected)
-            sdk.sometimes(
-                matches, f"special_drep_{name}_confirmed", {"vote_delegation": actual}
-            )
+            sdk.sometimes(matches, f"special_drep_{name}_confirmed", {"vote_delegation": actual})
         except Exception:  # noqa: BLE001
             pass
 
@@ -168,13 +166,18 @@ def _setup_treasury_recv_pool(cluster: clusterlib.ClusterLib) -> None:
             # Derive+persist the address once here so downstream ticks
             # never need another cardano-cli call just to read it back.
             cluster.g_stake_address.gen_stake_addr(
-                addr_name=name, stake_vkey_file=stake_keys.vkey_file, destination_dir=str(g.TREASURY_RECV_DIR)
+                addr_name=name,
+                stake_vkey_file=stake_keys.vkey_file,
+                destination_dir=str(g.TREASURY_RECV_DIR),
             )
             cert_files.append(reg_cert)
             signing.append(stake_keys.skey_file)
 
         g.build_sign_submit(
-            cluster, "setup_treasury_recv_pool", certificate_files=cert_files, signing_key_files=signing
+            cluster,
+            "setup_treasury_recv_pool",
+            certificate_files=cert_files,
+            signing_key_files=signing,
         )
     except Exception as exc:  # noqa: BLE001
         print(f"treasury-recv pool registration failed: {exc}", file=sys.stderr)

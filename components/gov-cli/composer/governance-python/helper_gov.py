@@ -439,8 +439,7 @@ def live_pparam_update_actions(cluster: clusterlib.ClusterLib):
         return [
             p
             for p in proposals
-            if p.get("proposalProcedure", {}).get("govAction", {}).get("tag")
-            == "ParameterChange"
+            if p.get("proposalProcedure", {}).get("govAction", {}).get("tag") == "ParameterChange"
         ]
     except Exception:  # noqa: BLE001
         return []
@@ -453,9 +452,9 @@ def get_prev_pparam_action(cluster: clusterlib.ClusterLib) -> tuple[str, int]:
     ledger rejects it outright. ("", -1) if none yet (first ever
     ParameterChange action in this testnet's lifetime)."""
     gov_state = cluster.g_query.get_gov_state()
-    prev = (
-        (gov_state.get("nextRatifyState") or {}).get("nextEnactState") or {}
-    ).get("prevGovActionIds", {}).get("PParamUpdate") or {}
+    prev = ((gov_state.get("nextRatifyState") or {}).get("nextEnactState") or {}).get(
+        "prevGovActionIds", {}
+    ).get("PParamUpdate") or {}
     txid = prev.get("txId") or ""
     ix = prev.get("govActionIx")
     return txid, -1 if ix is None else ix

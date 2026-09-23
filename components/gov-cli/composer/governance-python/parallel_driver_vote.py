@@ -30,17 +30,23 @@ def build_voters(cluster: clusterlib.ClusterLib):
         vkey = g.GD / f"default_drep_{i}_drep.vkey"
         skey = g.GD / f"default_drep_{i}_drep.skey"
         if vkey.exists():
-            voters.append(("drep", cluster.g_governance.vote.create_drep, "drep_vkey_file", vkey, skey))
+            voters.append(
+                ("drep", cluster.g_governance.vote.create_drep, "drep_vkey_file", vkey, skey)
+            )
     for i in range(1, g.NUM_POOLS + 1):
         vkey = g.GOV / "pools" / f"node-pool{i}" / "cold.vkey"
         skey = g.GOV / "pools" / f"node-pool{i}" / "cold.skey"
         if vkey.exists():
-            voters.append(("spo", cluster.g_governance.vote.create_spo, "cold_vkey_file", vkey, skey))
+            voters.append(
+                ("spo", cluster.g_governance.vote.create_spo, "cold_vkey_file", vkey, skey)
+            )
     for i in range(1, g.NUM_CC + 1):
         vkey = g.GD / f"cc_member{i}_committee_hot.vkey"
         skey = g.GD / f"cc_member{i}_committee_hot.skey"
         if vkey.exists():
-            voters.append(("cc", cluster.g_governance.vote.create_committee, "cc_hot_vkey_file", vkey, skey))
+            voters.append(
+                ("cc", cluster.g_governance.vote.create_committee, "cc_hot_vkey_file", vkey, skey)
+            )
     return voters
 
 
@@ -132,7 +138,9 @@ def main() -> int:
 
         sdk.sometimes(total >= 1, f"vote_recorded_{kind}")
         sdk.sometimes(True, f"vote_decision_{decision}")
-        sdk.sometimes(True, f"vote_decision_{decision}_by_{kind}", {"voter": kind, "decision": decision})
+        sdk.sometimes(
+            True, f"vote_decision_{decision}_by_{kind}", {"voter": kind, "decision": decision}
+        )
 
         all_roles = drep_n >= 1 and spo_n >= 1 and cc_n >= 1
         sdk.sometimes(

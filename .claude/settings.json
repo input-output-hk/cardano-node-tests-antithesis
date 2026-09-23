@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // .tool_response.filePath // empty' | { read -r f; case \"$f\" in */components/gov-cli/composer/governance-python/*.py) nix shell nixpkgs#ruff -c ruff format \"$f\";; esac; } 2>/dev/null || true",
+            "statusMessage": "ruff format",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}
