@@ -8,10 +8,12 @@ time, and every new proposal must reference the previous one's
 txid/index via --prev-governance-action-tx-id/--prev-governance-action-
 index (helper_gov.get_prev_pparam_action queries this live off gov-state
 each tick) or the ledger rejects it outright. This DOES ratify and enact
-once DRep+SPO+CC approval clears (unlike a treasury withdrawal, SPOs CAN
-vote on this action type - see the vote driver), exercising the
-enactment path for a real protocol-parameter change rather than a
-one-off balance transfer.
+once DRep+CC approval clears, exercising the enactment path for a real
+protocol-parameter change rather than a one-off balance transfer. SPOs
+are deliberately not in the roster: their eligibility depends on whether
+the targeted parameters fall in Conway's security-relevant group, and the
+allowlist below stays out of that group, so an SPO vote on any action
+this driver creates is rejected outright - see the vote driver.
 
 Only ever targets a small allowlist of parameters confirmed safe to
 toggle repeatedly: neither affects fee/size math other drivers rely on,
