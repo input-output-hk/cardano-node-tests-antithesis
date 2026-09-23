@@ -1,0 +1,4 @@
+# Local Claude Code settings (and the temp files it writes while saving them).
+# .claude/agents/ is intentionally tracked and shared.
+.claude/settings.local.json
+.claude/settings.local.json.tmp.*
