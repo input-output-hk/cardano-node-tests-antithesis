@@ -19,7 +19,7 @@ have a reachable node.
 
 ## Genesis + assets (cardonnay)
 
-`gov-configurator` runs cardonnay's `conway_fast` generator in a
+`gov-configurator` runs cardonnay's `local_fast` generator in a
 generation-only mode (no nodes started) to produce:
 
 - Byron/Shelley/Alonzo/**Conway genesis with the constitutional

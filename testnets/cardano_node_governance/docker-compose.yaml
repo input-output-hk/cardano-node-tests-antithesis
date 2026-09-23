@@ -13,7 +13,7 @@
 #
 # Genesis + governance assets (committee seeded in the Conway genesis,
 # DRep / vote-stake / CC keys + certs) are produced by gov-configurator
-# using cardonnay's conway_fast generator. The on-chain governance
+# using cardonnay's local_fast generator. The on-chain governance
 # operations are performed by the gov-cli drivers in a setup phase
 # (first_) plus parallel create/vote drivers.
 
