@@ -30,7 +30,7 @@ import helper_sdk as sdk
 from cardano_clusterlib import clusterlib
 
 
-def build_voters(cluster: clusterlib.ClusterLib):
+def build_voters(cluster: clusterlib.ClusterLib) -> list[g.Voter]:
     """Build the voter roster: every DRep and CC member (no SPOs - see
     module docstring). Each entry is (kind, create_fn, vkey_kw, vkey_file, skey_file)."""
     voters = []

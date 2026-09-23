@@ -39,12 +39,13 @@ import sys
 
 import helper_gov as g
 import helper_sdk as sdk
+from cardano_clusterlib import clusterlib
 
 MIN_TRANSFER = 1_000_000  # 1 ADA
 MAX_TRANSFER = 5_000_000  # 5 ADA
 
 
-def _claim_recv_slot(cluster):
+def _claim_recv_slot(cluster: clusterlib.ClusterLib) -> tuple[int | None, str | None]:
     """Try every treasury_recv{i} index once (RNG-shuffled start) and
     atomically claim the first free funds-receiving slot. Returns
     (idx, addr) or (None, None) if all NUM_DREPS slots are currently

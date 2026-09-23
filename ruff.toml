@@ -1,9 +1,38 @@
-# Formatting for the Python drivers.
+# Formatting and linting for the Python drivers.
 #   nix shell nixpkgs#ruff -c ruff format .
-# Also runs automatically on edited drivers, via the PostToolUse hook in
-# .claude/settings.json.
+#   nix shell nixpkgs#ruff -c ruff check .
+# `ruff format` also runs automatically on edited drivers, via the
+# PostToolUse hook in .claude/settings.json.
 line-length = 100
 
 # Only the drivers. Without this, ruff also walks the Markdown docs and
 # reformats Python code blocks embedded in them.
 include = ["components/gov-cli/composer/governance-python/*.py"]
+
+[lint]
+# Note what is deliberately absent: S (bandit) flags the try/except/pass
+# absorb pattern the drivers are built on, and EXE001 wants the drivers
+# chmod +x for their shebang - but 0644 in git is the point, since the
+# exec bit is granted per-prefix at image build.
+select = [
+    "ANN", "ARG", "B", "BLE", "C4", "C90", "DTZ", "E", "EM", "F", "FURB",
+    "I001", "ISC", "N", "PERF", "PIE", "PL", "PLE", "PLR", "PLW", "PT",
+    "PTH", "Q", "RET", "RSE", "RUF", "SIM", "TRY", "UP", "W", "YTT",
+]
+
+ignore = [
+    "ANN401", "B905", "ISC001", "PLR0912", "PLR0913", "PLR0915", "PLR2004",
+    "PTH123", "RET504", "TRY002", "TRY301", "UP006", "UP007", "UP035",
+
+    # Every driver path returns 0 - failure is signalled by assertions, not
+    # exit codes - so many early returns are the contract, not a smell.
+    "PLR0911",
+    # wait_for_node / wait_for_epoch retry inside the loop on purpose; a node
+    # is expected to be unreachable mid-fault.
+    "PERF203",
+    # Structural opinions on working driver code.
+    "C901", "PLR0917",
+]
+
+[lint.isort]
+force-single-line = true

@@ -31,6 +31,7 @@ its own first_ script.
 
 from __future__ import annotations
 
+import contextlib
 import sys
 
 import helper_gov as g
@@ -258,17 +259,13 @@ def main() -> int:
     _confirm_special_dreps(cluster, special_drep_addrs)
 
     cc_active = 0
-    try:
+    with contextlib.suppress(Exception):
         cc_active = g.count_active_committee_members(cluster)
-    except Exception:  # noqa: BLE001
-        pass
     sdk.sometimes(cc_active >= 1, "committee_active_after_setup")
 
     dreps = 0
-    try:
+    with contextlib.suppress(Exception):
         dreps = len(cluster.g_query.get_drep_state() or [])
-    except Exception:  # noqa: BLE001
-        pass
     sdk.sometimes(dreps >= 1, "dreps_registered_after_setup")
 
     # Generate and fund a pool of payment addresses for the parallel drivers.

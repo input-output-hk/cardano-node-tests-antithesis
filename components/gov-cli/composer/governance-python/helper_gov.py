@@ -11,6 +11,7 @@ parameters come from the genesis state dir at $GOV_STATE_DIR.
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import contextlib
 import fcntl
 import json
@@ -18,6 +19,7 @@ import os
 import pathlib
 import subprocess
 import time
+import typing as tp
 
 from cardano_clusterlib import clusterlib
 
@@ -81,6 +83,14 @@ SPECIAL_DREP_TARGETS = [
     ("always_no_confidence", {"always_no_confidence": True}, "alwaysNoConfidence"),
 ]
 
+# One entry of a vote driver's voter roster:
+# (kind, clusterlib create_fn, that fn's vkey kwarg name, vkey_file, skey_file).
+Voter = tuple[str, cabc.Callable[..., tp.Any], str, pathlib.Path, pathlib.Path]
+
+# try_acquire_payment_addr's result: the address plus the open lock handle to
+# release, or (None, None) when the address is already locked or missing.
+PaymentAddrLock = tuple[clusterlib.AddressRecord | None, tp.IO[str] | None]
+
 
 def ensure_dirs() -> None:
     for d in (WORK, STATE_DIR, PENDING_TREASURY_WITHDRAWALS_DIR, PENDING_PPARAM_UPDATES_DIR):
@@ -110,7 +120,7 @@ def wait_for_node(cluster: clusterlib.ClusterLib, tries: int = 150) -> bool:
         try:
             if cluster.g_query.get_slot_no() > 0:
                 return True
-        except Exception:
+        except Exception:  # noqa: BLE001
             pass
         time.sleep(2)
     return False
@@ -126,7 +136,7 @@ def wait_for_epoch(cluster: clusterlib.ClusterLib, target: int, max_seconds: int
         try:
             if cluster.g_query.get_epoch() >= target:
                 return True
-        except Exception:
+        except Exception:  # noqa: BLE001
             pass
         time.sleep(5)
         waited += 5
@@ -134,7 +144,7 @@ def wait_for_epoch(cluster: clusterlib.ClusterLib, target: int, max_seconds: int
 
 
 @contextlib.contextmanager
-def faucet_lock(timeout: int = 120):
+def faucet_lock(timeout: int = 120) -> cabc.Iterator[None]:
     """Serialize faucet spends — concurrent build_tx calls would
     otherwise select the same UTxO and conflict."""
     ensure_dirs()
@@ -149,7 +159,8 @@ def faucet_lock(timeout: int = 120):
             except OSError:
                 time.sleep(1)
         if not locked:
-            raise TimeoutError("faucet lock timeout")
+            msg = "faucet lock timeout"
+            raise TimeoutError(msg)
         yield
     finally:
         if locked:
@@ -157,7 +168,7 @@ def faucet_lock(timeout: int = 120):
         fh.close()
 
 
-def try_acquire_payment_addr(idx: int):
+def try_acquire_payment_addr(idx: int) -> PaymentAddrLock:
     """Non-blocking lock on pool address idx.
     Returns (AddressRecord, lock_fh) on success, (None, None) if in use or missing."""
     addr_path = PAYMENT_POOL / f"addr_{idx}.addr"
@@ -183,7 +194,7 @@ def try_acquire_payment_addr(idx: int):
     return rec, fh
 
 
-def release_payment_addr(fh) -> None:
+def release_payment_addr(fh: tp.IO[str] | None) -> None:
     if fh is None:
         return
     try:
@@ -232,7 +243,7 @@ def claim_recv_slot(idx: int, pre_balance: int, claimed_epoch: int) -> bool:
     return True
 
 
-def complete_recv_slot(idx: int, **fields) -> None:
+def complete_recv_slot(idx: int, **fields: tp.Any) -> None:
     """Fill in a claimed slot with the submitted action's details
     (recv_addr, txid, ix, transfer_amt) once build_sign_submit succeeds."""
     path = PENDING_TREASURY_WITHDRAWALS_DIR / f"recv_{idx}.json"
@@ -274,7 +285,7 @@ def pending_recv_slots() -> list[tuple[int, dict]]:
 # claim/lock semantics are needed here (contrast claim_recv_slot above).
 
 
-def record_pending_pparam_update(txid: str, ix: int, param_key: str, expected_value) -> None:
+def record_pending_pparam_update(txid: str, ix: int, param_key: str, expected_value: int) -> None:
     ensure_dirs()
     path = PENDING_PPARAM_UPDATES_DIR / f"{txid}_{ix}.json"
     path.write_text(json.dumps({"param_key": param_key, "expected_value": expected_value}))
@@ -304,11 +315,11 @@ def build_sign_submit(
     cluster: clusterlib.ClusterLib,
     name: str,
     *,
-    certificate_files=(),
-    proposal_files=(),
-    vote_files=(),
-    signing_key_files=(),
-    txouts=(),
+    certificate_files: cabc.Sequence[pathlib.Path] = (),
+    proposal_files: cabc.Sequence[pathlib.Path] = (),
+    vote_files: cabc.Sequence[pathlib.Path] = (),
+    signing_key_files: cabc.Sequence[pathlib.Path] = (),
+    txouts: cabc.Sequence[clusterlib.TxOut] = (),
     src_addr: clusterlib.AddressRecord | None = None,
 ) -> str:
     """Build, sign, submit. Returns txid.
@@ -346,7 +357,7 @@ def build_sign_submit(
     return cluster.g_transaction.get_txid(tx_body_file=out.out_file)
 
 
-def lookup_proposal(gov_state: dict, action_txid: str):
+def lookup_proposal(gov_state: dict, action_txid: str) -> dict | None:
     for prop in gov_state.get("proposals", []) or []:
         if prop.get("actionId", {}).get("txId") == action_txid:
             return prop
@@ -398,7 +409,7 @@ def unique_token() -> str:
 # failure is self-healing (the action reappears next tick).
 
 
-def live_info_actions(cluster: clusterlib.ClusterLib):
+def live_info_actions(cluster: clusterlib.ClusterLib) -> list[dict]:
     """Return the current InfoAction proposals (each a full gov-state
     proposal). Empty list if none or if the node can't be reached."""
     try:
@@ -412,7 +423,7 @@ def live_info_actions(cluster: clusterlib.ClusterLib):
         return []
 
 
-def live_treasury_withdrawal_actions(cluster: clusterlib.ClusterLib):
+def live_treasury_withdrawal_actions(cluster: clusterlib.ClusterLib) -> list[dict]:
     """Return the current TreasuryWithdrawals proposals (each a full
     gov-state proposal). Empty list if none or if the node can't be
     reached. Mirrors live_info_actions - unlike InfoActions, these
@@ -429,7 +440,7 @@ def live_treasury_withdrawal_actions(cluster: clusterlib.ClusterLib):
         return []
 
 
-def live_pparam_update_actions(cluster: clusterlib.ClusterLib):
+def live_pparam_update_actions(cluster: clusterlib.ClusterLib) -> list[dict]:
     """Return the current ParameterChange proposals (each a full gov-state
     proposal). Empty list if none or if the node can't be reached. Mirrors
     live_treasury_withdrawal_actions - these actions leave the set once
@@ -496,13 +507,11 @@ def rng_mod(n: int) -> int:
 def set_chain_verdict(kind: str, slot: int = 0) -> None:
     """Publish the latest chain-progress verdict: "<kind> <slot>"."""
     ensure_dirs()
-    try:
+    with contextlib.suppress(Exception):
         CHAIN_VERDICT.write_text(f"{kind} {slot}\n", encoding="utf-8")
-    except Exception:  # noqa: BLE001
-        pass
 
 
-def recent_stall(cluster: "clusterlib.ClusterLib | None" = None, within_slots: int = 450) -> bool:
+def recent_stall(cluster: clusterlib.ClusterLib | None = None, within_slots: int = 450) -> bool:
     """True if the most recent chain sample was a stall within within_slots slots.
 
     450 slots ≈ 90 seconds at 0.2 s/slot. Uses slot numbers (virtual time)

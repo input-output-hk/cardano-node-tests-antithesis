@@ -9,6 +9,7 @@ driver language a run uses.
 
 from __future__ import annotations
 
+import collections.abc as cabc
 import json
 import os
 import pathlib
@@ -21,7 +22,7 @@ def _emit(obj: dict) -> None:
         out_dir.mkdir(parents=True, exist_ok=True)
         with (out_dir / "sdk.jsonl").open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(obj) + "\n")
-    except Exception:
+    except Exception:  # noqa: BLE001
         # An SDK emit must never crash a driver.
         pass
 
@@ -86,7 +87,9 @@ def setup_complete(details: dict | None = None) -> None:
     _emit({"antithesis_setup": {"status": "complete", "details": details}})
 
 
-def run_driver(main_fn, aborted_id: str, exits_zero_id: str | None = None) -> None:
+def run_driver(
+    main_fn: cabc.Callable[[], int], aborted_id: str, exits_zero_id: str | None = None
+) -> None:
     """Shared `__main__` entrypoint for a driver script: run main_fn(),
     exit with its return code, and emit the standard exits_zero/aborted
     coverage signals under the caller's own assert IDs. Any exception is
