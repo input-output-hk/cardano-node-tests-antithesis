@@ -62,9 +62,9 @@ recovery), `finally_` (end marker), `helper_` (shared library, not scheduled).
   set at image build. Verify the outcome, not the recipe: `components/gov-cli/Dockerfile` must
   enforce this with a 0644 baseline plus explicit per-prefix globs — never a bare
   `chmod 0755 .../governance/*` or a `find -type f -exec chmod`, which grant the bit on existence
-  rather than prefix and so cannot express the rule. Check the `/opt/gov-drivers` reference copy
-  for the same defect; it is inert today (the composer scans only the live path) but it is the line
-  most likely to be missed when someone fixes the other one.
+  rather than prefix and so cannot express the rule. If the Dockerfile ever copies the drivers to a
+  second location, check that copy's mode too — an earlier revision had one and it carried the
+  identical defect.
   Why it matters: an executable file with an unrecognised prefix makes fuzzpipe reject the
   `WORKLOADS` list and drop **the entire workload** — no drivers run, no assertion fires, and the
   run reports clean (`97714e3`).
@@ -145,9 +145,12 @@ Three deliberate tiers. Flag a mismatch between tier and situation, never the br
 - Changing `k` cascades: epoch length → `first_setup.py`'s `wait_for_epoch(..., 5400)` call →
   `DURATION` (capped at 3 by moog) → the job's `timeout-minutes`, which must exceed
   `(DURATION + 2) * 60` (`8589ade`, `c2320da`).
-- Pool count appears in five places, and the two Dockerfile defaults already disagree (gov-cli 2,
-  gov-configurator 3). Network magic `42` appears in six. Adding a sixth/seventh consumer without
-  checking the others is a finding.
+- Pool count is a literal in `docker-compose.yaml` (×4), both Dockerfile `ENV` blocks,
+  `generate.sh`, and `helper_gov.py`'s env fallback — and the defaults already disagree (gov-cli 2,
+  gov-configurator 3); compose overrides both, so the mismatch only bites a standalone run.
+  `relay-topology.json` depends on the producer count implicitly, without stating a number. Grep
+  for the current set rather than trusting a count here; adding a consumer without checking the
+  existing ones is a finding.
 - `ANCHOR_TEXT` must stay byte-identical between `helper_gov.py` and `components/gov-cli/sleep.sh`.
   The `printf` there is deliberately not a heredoc — a heredoc's trailing newline breaks the anchor
   hash (`65ec436`).
