@@ -14,6 +14,21 @@ tested nothing. Rank the second outcome as more severe than the first.
 Read the diff first (`git diff`, or whatever range you were given), then read the files it touches
 in full. Several invariants below span files the diff does not touch — check those too.
 
+Two habits matter more than any single checklist item:
+
+- **Test the change's own causal claim.** If it says it fixes a named failure, verify against the
+  tree that it actually does. For a near-content-free diff — a one-line digest bump — that check
+  *is* the whole review.
+- **Trace a failure through the cold-start cascade before ranking it.** If `first_setup.py` fails it
+  returns 1 without writing `SETUP_MARKER`; every other driver then short-circuits on its
+  cold-start guard and returns 0 *before registering any `sometimes`*. Unregistered Sometimes
+  assertions cannot fail, so a broken setup yields a clean 3-hour report in which nothing was
+  exercised. Loud-looking failures are often the green-and-empty kind.
+
+The checklist below says what to verify. Where it describes current repo state, confirm that state
+still holds rather than assuming it — a rule written against a later tree misleads on an earlier
+one.
+
 ## What this repo is
 
 - `components/gov-cli/composer/governance-python/` — the drivers. Python 3, the only test code.
@@ -42,11 +57,17 @@ recovery), `finally_` (end marker), `helper_` (shared library, not scheduled).
   (`PROPERTIES.md`), not a pattern to copy.
 - Never emit `exits_zero` by hand at the end of `main()` — early returns skip it (`576f662`).
   `run_driver` emits it for you.
-- A new file's prefix must appear in the Dockerfile chmod block (`components/gov-cli/Dockerfile`,
-  the `chmod 0644 ... && chmod 0755 first_*/parallel_*/anytime_*/eventually_*/finally_*` run step).
-  Source files are 0644 in git; the exec bit is set at image build. Shared code takes the `helper_`
-  prefix so the composer ignores it — an unrecognised prefix that is executable makes fuzzpipe drop
-  **the entire workload** (`97714e3`).
+- **No file shipped into `/opt/antithesis/test/v1/governance` may be mode 0755 unless its name
+  starts with one of the five scheduled prefixes.** Source files are 0644 in git; the exec bit is
+  set at image build. Verify the outcome, not the recipe: `components/gov-cli/Dockerfile` must
+  enforce this with a 0644 baseline plus explicit per-prefix globs — never a bare
+  `chmod 0755 .../governance/*` or a `find -type f -exec chmod`, which grant the bit on existence
+  rather than prefix and so cannot express the rule. Check the `/opt/gov-drivers` reference copy
+  for the same defect; it is inert today (the composer scans only the live path) but it is the line
+  most likely to be missed when someone fixes the other one.
+  Why it matters: an executable file with an unrecognised prefix makes fuzzpipe reject the
+  `WORKLOADS` list and drop **the entire workload** — no drivers run, no assertion fires, and the
+  run reports clean (`97714e3`).
 
 ## 2. Determinism
 
@@ -81,13 +102,31 @@ Three deliberate tiers. Flag a mismatch between tier and situation, never the br
 
 ## 4. Build and pin sync
 
-- A `components/**` change on `main` gets an automatic re-pin commit from
-  `.github/workflows/rebuild-gov-images.yaml`. On any **other branch it does not** — the run will
-  execute the old image. This exact gap wasted a Leios run (`a28534f`). Hand-edited digests in
-  `docker-compose.yaml` alongside a `components/**` change are suspect; the bot owns those lines.
-- `LEIOS_NODE_REV` (`components/gov-cli/Dockerfile`, also the default in
-  `scripts/build-leios-node-image.sh`) and the workflow's `LEIOS_NODE_IMAGE` digest must come from
+- A `components/**` change gets an automatic re-pin commit from
+  `.github/workflows/rebuild-gov-images.yaml` **only** when it lands as a push to `main`. Two ways
+  to miss it, both of which leave the run executing the old image while the source looks correct:
+  the change lands on another branch, or it predates a change to the workflow's own trigger/paths.
+  A missed re-pin has wasted a full Leios run before.
+- Hand-edited digests in `docker-compose.yaml` are suspect in **both** directions. Alongside a
+  `components/**` change: the bot owns those lines and will regenerate them. *Without* a
+  `components/**` change the pin is weaker still — nothing records which tree it was built from,
+  and `scripts/push-gov-images.sh` builds from the local working directory with no clean-tree
+  check, so a dirty checkout yields an authoritative-looking, unauditable digest. Prefer a no-op
+  touch under `components/` on `main` so CI builds from committed sources and leaves the trail.
+- On any pin change, establish **which commit the image was built from and by what**. The repo's
+  whole safety model is "the pinned digest is the reviewed source"; if that link is unproven, every
+  prior review of the driver source reviewed code that isn't running.
+- Treat unpinned build inputs in a rebuilt image as a finding: the floating `FROM debian:*` base,
+  unpinned `apt-get install`, and especially `pip install cardano-clusterlib` with no version
+  constraint. A rebuild advertised as "pick up commit X" silently also bumps every one of these,
+  and the result can't be reproduced later. `CARDONNAY_VERSION` is pinned; clusterlib is not.
+- Verify — don't assume — that `LEIOS_NODE_REV` (`components/gov-cli/Dockerfile`, also the default
+  in `scripts/build-leios-node-image.sh`) and the workflow's `LEIOS_NODE_IMAGE` digest come from
   the same commit. Nothing enforces it; drift gives a BLS TextEnvelope tag mismatch.
+- Check that the `cardano-cli` inside the pinned image actually supports the era the config
+  selects (`GOV_COMMAND_ERA`). A tagged-release cli handed a newer era crashes inside `cardano-api`
+  on an incomplete pattern match; clusterlib's `CommandEras` accepting an era proves nothing about
+  the binary it shells out to.
 - `docker-compose.yaml`'s literal `${VAR:-default}` text is load-bearing. moog runs the file exactly
   as committed, so the workflow's `leios-patch` step selects Leios mode by `sed`-ing that literal
   text. Renaming a var or reflowing that YAML breaks mode selection **silently**. `NODE_IMAGE`
