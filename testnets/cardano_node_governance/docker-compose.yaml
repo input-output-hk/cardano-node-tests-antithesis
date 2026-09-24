@@ -28,7 +28,7 @@ x-cardano-node: &cardano-node
   # NODE_EXTRA_ARGS (used in command: below) carries the extra CLI flags
   # a Leios node needs beyond Praos - currently just
   # "--shelley-bls-key /configs/keys/bls.skey" - empty/unset for Conway.
-  image: ${NODE_IMAGE:-ghcr.io/intersectmbo/cardano-node@sha256:007da778998d0bdb043fb834c62b9da1c95e33610f31f6f9cccab29a945e2b99}
+  image: ${NODE_IMAGE:-ghcr.io/saratomaz/cardano-node-tests-antithesis/cardano-node-master@sha256:361e6e34f772ab146088f5a3a6136fdc5700e5196bf2ea06ff3fc39d91dd1267}
   environment:
     CARDANO_BLOCK_PRODUCER: true
   command: >
@@ -122,7 +122,7 @@ services:
   relay1:
     # Same NODE_IMAGE override as the &cardano-node anchor above -
     # relay1 has its own image line since it doesn't use that anchor.
-    image: ${NODE_IMAGE:-ghcr.io/intersectmbo/cardano-node@sha256:007da778998d0bdb043fb834c62b9da1c95e33610f31f6f9cccab29a945e2b99}
+    image: ${NODE_IMAGE:-ghcr.io/saratomaz/cardano-node-tests-antithesis/cardano-node-master@sha256:361e6e34f772ab146088f5a3a6136fdc5700e5196bf2ea06ff3fc39d91dd1267}
     container_name: relay1
     hostname: relay1.example
     labels:
