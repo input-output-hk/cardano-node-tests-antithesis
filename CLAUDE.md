@@ -23,8 +23,12 @@ Antithesis fault-injection testnets for cardano-node. `README.md` and
   the image automatically, but only when pushed to `main`. Don't hand-edit the digests.
 - `docker-compose.yaml`'s literal `${VAR:-default}` text is load-bearing — the Leios workflow
   `sed`s it. Reflowing that file breaks mode selection silently.
-- Protocol constants are duplicated across `generate.sh`, both Dockerfile `ENV` blocks,
-  `helper_gov.py` and `docker-compose.yaml` (which wins). `EPOCH_LENGTH == 100 * SECURITY_PARAM`.
+- `SECURITY_PARAM` (k) is written only in `docker-compose.yaml`; `generate.sh` requires it and
+  derives `epochLength` as 100·k. Changing k still cascades by hand to `first_setup.py`'s
+  `wait_for_epoch` timeout, `DURATION`, and the job's `timeout-minutes`.
+- Other constants (network magic, pool count) are still duplicated across `generate.sh`, the
+  Dockerfile `ENV` blocks, `helper_gov.py` and `docker-compose.yaml` (which wins). Grep for all
+  sites before changing one.
 
 ## Working here
 

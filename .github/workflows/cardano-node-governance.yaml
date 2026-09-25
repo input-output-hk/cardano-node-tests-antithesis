@@ -1,7 +1,8 @@
 name: "Antithesis"
 env:
   TESTNET: testnets/cardano_node_governance
-  # govActionLifetime is 2 epochs @ 50min/epoch (15000 slots * 0.2s) = 100min
+  # govActionLifetime is 2 epochs @ ~50min/epoch at k=150 (epochLength is
+  # 100*k = 15000 slots * 0.2s; see docker-compose.yaml) = 100min
   # for an action to reach expiry, plus first_setup's 1-epoch wait before
   # create/vote drivers even start - DURATION must clear that with margin
   # for action_near_expiry (PROPERTIES.md) to ever get exercised. Capped at

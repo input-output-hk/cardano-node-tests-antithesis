@@ -116,10 +116,11 @@ Three deliberate tiers. Flag a mismatch between tier and situation, never the br
 - On any pin change, establish **which commit the image was built from and by what**. The repo's
   whole safety model is "the pinned digest is the reviewed source"; if that link is unproven, every
   prior review of the driver source reviewed code that isn't running.
-- Treat unpinned build inputs in a rebuilt image as a finding: the floating `FROM debian:*` base,
-  unpinned `apt-get install`, and especially `pip install cardano-clusterlib` with no version
-  constraint. A rebuild advertised as "pick up commit X" silently also bumps every one of these,
-  and the result can't be reproduced later. `CARDONNAY_VERSION` is pinned; clusterlib is not.
+- Treat a newly unpinned build input as a finding: a `pip install` or download without a version,
+  since a rebuild advertised as "pick up commit X" then silently bumps it too. `CLUSTERLIB_VERSION`,
+  `CARDONNAY_VERSION`, `NODE_VERSION` and `LEIOS_NODE_REV` are all pinned. The `FROM debian:*` base
+  and `apt-get install` are deliberately left floating — the running artifact is pinned by digest,
+  so a rebuild picking up Debian security updates is wanted, not drift.
 - Verify — don't assume — that `LEIOS_NODE_REV` (`components/gov-cli/Dockerfile`, also the default
   in `scripts/build-leios-node-image.sh`) and the workflow's `LEIOS_NODE_IMAGE` digest come from
   the same commit. Nothing enforces it; drift gives a BLS TextEnvelope tag mismatch.
@@ -137,14 +138,13 @@ Three deliberate tiers. Flag a mismatch between tier and situation, never the br
 
 ## 5. Config constants
 
-- `EPOCH_LENGTH == 100 * SECURITY_PARAM` (i.e. `10·k/f`, `f=0.1`). Stated in `generate.sh`.
-- `k` and epoch length are defined in three places that must agree: `generate.sh` defaults,
-  `components/gov-configurator/Dockerfile` `ENV` defaults, and `docker-compose.yaml` (the
-  authoritative override). Dockerfile defaults drifting from compose is invisible in CI and wrong
-  for standalone runs (`63f0cd4`).
-- Changing `k` cascades: epoch length → `first_setup.py`'s `wait_for_epoch(..., 5400)` call →
+- `SECURITY_PARAM` (k) is single-sourced in `docker-compose.yaml`. `generate.sh` requires it
+  (`:?`, no default) and derives `epochLength` as `100·k` (`10·k/f`, `f=0.1`). Flag any change
+  that reintroduces a second place to write k, or that hardcodes an epoch length instead of
+  deriving it — that duplication silently mis-generated genesis before (`63f0cd4`).
+- Changing `k` still cascades by hand: `first_setup.py`'s `wait_for_epoch(..., 5400)` call →
   `DURATION` (capped at 3 by moog) → the job's `timeout-minutes`, which must exceed
-  `(DURATION + 2) * 60` (`8589ade`, `c2320da`).
+  `(DURATION + 2) * 60` (`8589ade`, `c2320da`). None of those derive from k, so check them.
 - Pool count is a literal in `docker-compose.yaml` (×4), both Dockerfile `ENV` blocks,
   `generate.sh`, and `helper_gov.py`'s env fallback — and the defaults already disagree (gov-cli 2,
   gov-configurator 3); compose overrides both, so the mismatch only bites a standalone run.
@@ -179,10 +179,14 @@ Three deliberate tiers. Flag a mismatch between tier and situation, never the br
 
 ## 7. Style — lowest priority
 
-No linter or formatter config exists in this repo, so there is nothing to appeal to. Match the
-surrounding file: `from __future__ import annotations`, type hints, ~100-column wrap,
-`set -euo pipefail` in `scripts/*.sh`. Only flag a deviation from a file's own established
-convention. Do not open a style debate the repo has no tooling to settle.
+`ruff.toml` at the repo root owns Python style, and a PostToolUse hook formats edited drivers, so
+don't hand-review formatting — run `nix shell nixpkgs#ruff -c ruff check .` instead and report what
+it says. Note what ruff deliberately does *not* select: `S` (bandit) would flag the try/except/pass
+absorb pattern, and `EXE001` would want the drivers chmod +x when 0644 in git is the point. Never
+flag either.
+
+Nothing covers shell, so for `scripts/*.sh` match the surrounding file (`set -euo pipefail`) and
+only flag a deviation from its own established convention.
 
 ## Output
 

@@ -251,7 +251,8 @@ def main() -> int:
     # DRep stake delegation takes effect at the next epoch boundary.
     try:
         start_epoch = g.current_epoch(cluster)
-        # Epochs are ~50 min (epochLength 15000 x 0.2s), so allow > 1 epoch.
+        # ~50 min/epoch at k=150 (epochLength is 100*k = 15000 slots x
+        # 0.2s), so allow > 1 epoch. Not derived from k - revisit if k moves.
         g.wait_for_epoch(cluster, start_epoch + 1, 5400)
     except Exception:  # noqa: BLE001
         pass

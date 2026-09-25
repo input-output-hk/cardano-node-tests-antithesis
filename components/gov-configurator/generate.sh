@@ -34,8 +34,15 @@ NUM_POOLS="${NUM_POOLS:-3}"
 # essentially no margin. Raise k with real headroom over that (3
 # producers give a 2-vs-1 majority so only the minority reorgs) and
 # keep cardonnay's epochLength = 10·k/f ratio for nonce stability.
-SECURITY_PARAM="${SECURITY_PARAM:-150}"
-EPOCH_LENGTH="${EPOCH_LENGTH:-15000}"
+#
+# k has no default on purpose: docker-compose.yaml is the single place it
+# is written, so a run that somehow loses it fails here instead of
+# silently generating genesis with cardonnay's k=10.
+SECURITY_PARAM="${SECURITY_PARAM:?must be set (see docker-compose.yaml)}"
+# Derived, never configured: epochLength = 10·k/f with f=0.1, i.e. 100·k.
+# Deliberately not overridable - an override that broke the ratio would
+# put the nonce-stability window (3k/f) outside the epoch, silently.
+EPOCH_LENGTH=$((SECURITY_PARAM * 100))
 GEN_ROOT=/work/cdny
 
 # Generate once per volume lifetime. Every `docker compose up` starts
@@ -96,6 +103,17 @@ START="${SCRIPT_DIR}/common-start-fast"
 # (3k/f) fits inside an epoch.
 SPEC="${SCRIPT_DIR}/genesis.spec.json"
 if [ -f "$SPEC" ]; then
+    # The 100·k derivation above is 10·k/f with f=0.1, but activeSlotsCoeff
+    # belongs to cardonnay's spec, not to us. Check it rather than assume
+    # it: a cardonnay bump that moves f would otherwise leave us silently
+    # generating a genesis whose nonce-stability window doesn't fit.
+    F=$(jq -r '.activeSlotsCoeff' "$SPEC")
+    if [ "$F" != "0.1" ]; then
+        echo "genesis spec has activeSlotsCoeff=${F}, expected 0.1;" \
+            "the epochLength=100*k derivation assumes f=0.1" >&2
+        exit 1
+    fi
+
     jq --argjson k "$SECURITY_PARAM" --argjson el "$EPOCH_LENGTH" \
         '.securityParam = $k | .epochLength = $el' "$SPEC" > "${SPEC}.tmp" \
         && mv "${SPEC}.tmp" "$SPEC"
