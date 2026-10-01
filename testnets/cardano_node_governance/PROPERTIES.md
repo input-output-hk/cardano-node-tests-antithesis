@@ -19,6 +19,15 @@ below since they're identical scaffolding, not test-specific behavior.
 `first_setup.py` is the one driver that doesn't emit `setup_exits_zero`
 (a pre-existing gap, kept as-is — see the driver-simplification commit).
 
+**Reading a red Leios report:** in Leios mode the `tx-firehose` service
+puts sustained transaction load on `relay1`, which every driver queries.
+That gives `chain_progress_relay_unreachable` and the various
+`*_node_not_ready` assertions a load-related failure mode they don't have
+in Conway — a saturated mempool during a stall is when a
+`LocalStateQuery` is most likely to time out. Check whether the load was
+running before reading one of those as a node bug; `TX_FIREHOSE=false`
+re-runs without it.
+
 ## `first_setup.py` — one-shot setup, no fault injection
 
 | Assertion | Type | Meaning |

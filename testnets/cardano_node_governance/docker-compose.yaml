@@ -184,6 +184,59 @@ services:
       gov-configurator:
         condition: service_completed_successfully
 
+  # Leios load generator. Deliberately the *same image and digest* as
+  # gov-cli - the binary is built in its Dockerfile's nix stage - with
+  # the entrypoint overridden. That keeps one nix builder stage, one
+  # /nix/store layer and one image pull, while still being a real
+  # separate container with its own restart policy and logs.
+  # push-gov-images.sh's re-pin sed is global, so it rewrites this
+  # digest and gov-cli's together; they must never diverge.
+  #
+  # Leios endorser blocks only certify transactions that are actually in
+  # the mempool, and the governance drivers submit ~one tx per composer
+  # tick. Without this, a Leios run only proves the node boots.
+  # /tx-firehose.sh follows the generated genesis: it submits only when
+  # protocolVersion.major >= 12 and idles in Conway, so there is no
+  # second switch that could disagree with PROTOCOL_VERSION above.
+  tx-firehose:
+    image: ghcr.io/saratomaz/cardano-node-tests-antithesis/gov-cli@sha256:c53b514a414b7760695d68f5923d877ab01530332a24d2ecf57df40862b55b00
+    container_name: tx-firehose
+    hostname: tx-firehose.example
+    entrypoint: ["/tx-firehose.sh"]
+    # Load must be a stable backdrop, not a fault target: if this could
+    # be paused or killed, an EB-certification failure under a network
+    # fault would be indistinguishable from "the load stopped".
+    labels:
+      com.antithesis.exclude_from_faults: "network,kill,pause,stop"
+    environment:
+      CARDANO_NODE_SOCKET_PATH: /state/node.socket
+      TESTNET_MAGIC: "42"
+      GOV: /gov-data
+      GOV_STATE_DIR: /gov-state
+      # Upstream's Leios rate (cardano-node-tests runner/env_leios). A
+      # plain literal, not a ${...}: the workflow's leios-patch sed only
+      # knows about the placeholders it already rewrites.
+      TX_TPS: "15"
+      # Escape hatch for triaging a suspected load-caused failure.
+      # Unset - which is what moog runs, since it passes no env - means
+      # "follow the genesis", so this is not a second gate of record.
+      # Needs the passthrough: compose does not forward host env vars
+      # that a service doesn't list.
+      TX_FIREHOSE: ${TX_FIREHOSE:-}
+    volumes:
+      - relay1-state:/state:ro
+      # Both read-only: it only reads its own signing key and the
+      # genesis, so it structurally cannot touch faucet.lock, the
+      # payment-address pool or the treasury claim slots.
+      - gov-data:/gov-data:ro
+      - gov-state:/gov-state:ro
+    restart: always
+    depends_on:
+      relay1:
+        condition: service_started
+      gov-configurator:
+        condition: service_completed_successfully
+
   sidecar:
     image: ghcr.io/cardano-foundation/cardano-node-antithesis/sidecar:1ff6913
     environment:

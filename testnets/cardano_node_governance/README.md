@@ -10,12 +10,61 @@ Conway **governance** workload under Antithesis fault injection.
 | `relay1` | relay | excluded | stable query/submit endpoint |
 | `gov-cli` | cardano-cli driver host | excluded | sleeps; Antithesis execs the governance drivers |
 | `gov-configurator` | one-shot init | n/a | cardonnay genesis + governance assets |
+| `tx-firehose` | Leios load generator | excluded | same image as `gov-cli`; idles unless `protocolVersion >= 12` |
 | `tracer`, `tracer-sidecar`, `log-tailer`, `sidecar` | support | excluded | reused from master |
 
 Three block producers run under fault injection, so a network
 partition leaves a 2-vs-1 majority to anchor the canonical chain; the
 single relay is kept out of faults so the governance drivers always
 have a reachable node.
+
+## Leios load (`tx-firehose`)
+
+Leios's endorser blocks only certify transactions that are already in
+the mempool, and the governance drivers submit roughly one transaction
+per composer tick. Without sustained load a Leios run only proves the
+Dijkstra node boots and survives faults, not that Leios's throughput
+mechanism does - upstream's `test_leios_blocks.py` skips itself outright
+when no generator is enabled, for the same reason.
+
+The `tx-firehose` service runs the **same image and digest** as
+`gov-cli` with its entrypoint overridden to `/tx-firehose.sh`; the
+binary is built from `LEIOS_NODE_REV` in that image's nix stage, so the
+generator, the cli and the node all come from one commit.
+
+It follows the generated genesis rather than a switch of its own:
+`/tx-firehose.sh` reads `protocolVersion.major` out of
+`gov-state/shelley/genesis.json` and submits only when it is `>= 12`,
+idling in Conway. That is deliberate - a second env switch flipped
+alongside `PROTOCOL_VERSION` could disagree with it, silently either
+losing the Leios coverage or putting load on the Conway baseline.
+
+| Knob | Default | Effect |
+|---|---|---|
+| `TX_FIREHOSE` | unset | `true`/`false` forces the gate, overriding the genesis. Passed through from the environment, so `TX_FIREHOSE=false docker compose up` works locally |
+| `TX_TPS` | `15` | submission rate ceiling (upstream's Leios rate) |
+| `TX_INPUTS_PER_TX`, `TX_OUTPUTS_PER_TX` | `1` | tx shape |
+| `TX_FEE` | `200000` | flat fee; `TxFirehose.Build.Fail` in the log means it is too low |
+| `TX_MAX_CONSECUTIVE_ERRORS` | `50` | rejects tolerated before it exits and is restarted |
+
+Only `TX_FIREHOSE` is wired as a passthrough; the rest are read from the
+environment by `/tx-firehose.sh` but not listed in the service, so
+changing one means editing the `tx-firehose` service's `environment:`
+block. A run dispatched through moog gets the committed values either
+way - moog passes no environment of its own.
+
+Its funding key is cardonnay's second genesis UTxO key
+(`genesis-utxo2`), staged by `gov-configurator` into
+`/gov-data/tx-firehose/` only in Leios mode. It is pre-funded from slot
+0, so no funding transaction is needed, and it keeps the generator off
+the shared faucet, whose spends are serialized on a lock. Enabling
+cardonnay's own `tx-generator` or `tx-centrifuge` would race it for that
+same key.
+
+Expect restarts: the generator caches its fund set at startup, so every
+reorg invalidates it and it exits once
+`--max-consecutive-errors` is hit. `/tx-firehose.sh` restarts it with a
+fresh fund set and never gives up, so that cycle is normal here.
 
 ## Genesis + assets (cardonnay)
 
