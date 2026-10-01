@@ -54,6 +54,13 @@ See [`testnets/cardano_node_governance/README.md`](testnets/cardano_node_governa
 
 - Docker and Docker Compose v2
 - Access to pull images from `ghcr.io/intersectmbo` and `ghcr.io/cardano-foundation`
+- tAda in the moog requester wallet, before dispatching the Antithesis
+  workflow. An empty wallet does not fail `create-test`: the request is
+  accepted and then never picked up, so the run sits in `pending`.
+  `scripts/wait-for-test.sh` gives up after `PENDING_TIMEOUT` (30min by
+  default) and says so, but checking first avoids the wasted dispatch -
+  `moog wallet info` prints the address, and any preprod explorer shows
+  its balance. Top up from the Cardano preprod faucet.
 
 ## Upstreams
 

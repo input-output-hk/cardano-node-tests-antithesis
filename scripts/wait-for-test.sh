@@ -13,7 +13,20 @@ ID="$1"
 # control characters before parsing.
 function query_run() { moog facts test-runs --test-run-id "$ID" | tr -d '\000-\037' | jq '.[0]'; }
 
-echo "waiting to be accepted..."
+# A run that is never picked up sits in "pending" indefinitely, and the
+# commonest cause by far is the requester wallet being out of tAda -
+# create-test succeeds, so nothing upstream complains. Unbounded, this
+# loop then burns the caller's whole (DURATION + 2)h budget before the
+# job is killed, with the reason buried in "..." output. Bound it and
+# name the likely cause instead.
+# 30min: deliberately far longer than acceptance is believed to take,
+# since failing a legitimately queued run wastes a dispatch, while still
+# saving ~4.5h of the old unbounded behaviour. Lower it once there is
+# data on real acceptance latency.
+PENDING_TIMEOUT="${PENDING_TIMEOUT:-1800}"
+WAITED=0
+
+echo "waiting to be accepted (giving up after ${PENDING_TIMEOUT}s)..."
 while true; do
   STATUS=$(query_run | jq -r .value.phase)
   case $STATUS in
@@ -30,13 +43,22 @@ while true; do
       break;
       ;;
     pending)
+      if [ "$WAITED" -ge "$PENDING_TIMEOUT" ]; then
+        echo "still pending after ${WAITED}s - giving up." >&2
+        echo "The usual cause is the requester wallet being out of tAda:" >&2
+        echo "create-test is accepted, but no agent ever picks the run up." >&2
+        echo "Check the balance of the address from \`moog wallet info\` and" >&2
+        echo "top it up from the Cardano preprod faucet, then re-dispatch." >&2
+        exit 1
+      fi
       ;;
     *)
       echo "unknown status: $STATUS"
       ;;
   esac
   sleep 10
-  echo "..."
+  WAITED=$((WAITED + 10))
+  echo "... (${WAITED}s)"
 done
 
 echo "waiting to be finished..."
