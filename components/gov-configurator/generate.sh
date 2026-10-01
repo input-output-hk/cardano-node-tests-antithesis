@@ -192,6 +192,40 @@ fi
 mkdir -p /gov-data/governance_data /gov-data/faucet /gov-data/pools /gov-data/state
 cp -r "${STATE}/governance_data/." /gov-data/governance_data/
 cp "${STATE}/shelley/genesis-utxo."* /gov-data/faucet/
+
+# tx-firehose funding key (Leios only). cardonnay's `create-staked
+# --gen-utxo-keys 2` emits a second genesis UTxO key that nothing else
+# claims - the glob above is anchored on the literal dot, so it takes
+# genesis-utxo.* and never genesis-utxo2.*. Hand that second key to the
+# load generator: it is funded from slot 0, so no funding tx is needed
+# (this script runs with no node at all), and it keeps the generator off
+# the faucet, whose spends are serialized on helper_gov's faucet_lock.
+#
+# cardonnay reserves this same key for its own tx-generator and
+# tx-centrifuge setups, which are mutually exclusive precisely because
+# they share it. Enabling either against this testnet would race the
+# load generator for the same UTxO.
+#
+# Deliberately a warning, not a hard failure. Everything else waits on
+# this container via service_completed_successfully, so exiting here
+# would block the producers, relay1 and gov-cli, leave first_setup.py
+# unrun and SETUP_MARKER unwritten - every driver then returns 0 on its
+# cold-start guard, and a never-firing Sometimes is a coverage gap
+# rather than a failure. That is a silently green run in which nothing
+# was exercised, which is far worse than a missing load generator.
+# tx-firehose.sh does its own check and says so loudly.
+if [ "$PROTOCOL_VERSION" -ge 12 ]; then
+    if [ -f "${STATE}/shelley/genesis-utxo2.skey" ]; then
+        mkdir -p /gov-data/tx-firehose
+        cp "${STATE}/shelley/genesis-utxo2."* /gov-data/tx-firehose/
+        echo "PROTOCOL_VERSION >= 12: staged genesis-utxo2 for tx-firehose"
+    else
+        echo "WARNING: genesis-utxo2.skey missing - cardonnay no longer emits a" \
+            "second genesis UTxO key. tx-firehose will have no funding source;" \
+            "the governance workload is unaffected." >&2
+    fi
+fi
+
 for ((i = 1; i <= NUM_POOLS; i++)); do
     mkdir -p "/gov-data/pools/node-pool${i}"
     cp "${STATE}/nodes/node-pool${i}/cold.vkey" "/gov-data/pools/node-pool${i}/"
