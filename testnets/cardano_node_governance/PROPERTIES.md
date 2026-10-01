@@ -218,6 +218,29 @@ happened, with no Always invariant.
 | `chain_producing` | Sometimes | the chain produced blocks during a sample window |
 | `relay_reachable_under_fault` | **Always** | relay1 must always answer, since it's excluded from faults |
 
+## `anytime_leios_load.py` — Leios load witness, runs continuously
+
+Leios-only: in Conway the load generator is inert by design, so this
+driver asserts nothing at all there rather than leaving an unfired
+Sometimes as noise. It gates on `protocolVersion.major` in the generated
+genesis — the same artifact `tx-firehose.sh` gates on, so the two cannot
+disagree about whether load is expected.
+
+| Assertion | Type | Meaning |
+|---|---|---|
+| `leios_load entered` | Reachable | probe ran |
+| `leios_load_funding_key_missing` | Unreachable | Leios mode but gov-configurator never staged the funding key — the one case it deliberately only warns about, since failing there would block every service and produce a silently green run |
+| `leios_load_observed` | Sometimes | tx-firehose submitted and the chain accepted it — the UTxO set at its funding address changed within a sample window |
+
+`leios_load_observed` is the answer to "did the load actually happen".
+Never going green across a Leios run means the generator was dead,
+idling or disabled, so nothing in that run says anything about Leios
+under fault injection — however green the rest of the report looks. Only
+the positive observation is asserted: the UTxO set legitimately holds
+still while the chain is stalled under faults, which is a normal and
+frequent state here, so asserting on "no change" would flag the fault
+injection working as intended.
+
 ## `eventually_votes_recorded.py` — post-fault recovery check
 
 | Assertion | Type | Meaning |
