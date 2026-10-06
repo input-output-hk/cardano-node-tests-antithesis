@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Entrypoint for the tx-firehose container: the Leios load generator.
 #
-# Runs the same image as gov-cli (the binary is built in its Dockerfile's
-# nix stage) but as its own compose service, so it gets an independent
-# restart policy, its own logs and its own fault-exclusion label. The
-# load has to be a *stable backdrop*: if Antithesis could pause or kill
-# it, an EB-certification failure under a network fault would be
-# indistinguishable from "the load stopped, so there was nothing to
-# certify".
+# Its own image (components/tx-firehose/), not gov-cli's - reusing that
+# one made this container a second host for the governance drivers, which
+# is what broke run 37252534099. Its own container too, so it gets an
+# independent restart policy, its own logs and its own fault-exclusion
+# label. The load has to be a *stable backdrop*: if Antithesis could
+# pause or kill it, an EB-certification failure under a network fault
+# would be indistinguishable from "the load stopped, so there was
+# nothing to certify".
 #
 # Leios's endorser blocks only have something to do when the mempool has
 # transactions to certify, and the governance drivers submit roughly one
