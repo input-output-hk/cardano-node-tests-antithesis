@@ -19,7 +19,7 @@ ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${ROOT}"
 
 # Default: build both; optional positional args restrict to a subset.
-TARGETS=("gov-cli" "gov-configurator")
+TARGETS=("gov-cli" "gov-configurator" "tx-firehose")
 if [[ $# -gt 0 ]]; then
     TARGETS=("$@")
 fi

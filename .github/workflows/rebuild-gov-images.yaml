@@ -11,6 +11,7 @@ on:
     paths:
       - "components/gov-cli/**"
       - "components/gov-configurator/**"
+      - "components/tx-firehose/**"
 
 jobs:
   rebuild-and-pin:
@@ -43,7 +44,7 @@ jobs:
         run: |
           set -euo pipefail
           targets=()
-          for name in gov-cli gov-configurator; do
+          for name in gov-cli gov-configurator tx-firehose; do
             if ! git diff --quiet "${{ github.event.before }}" "${{ github.sha }}" -- "components/${name}/"; then
               targets+=("$name")
             fi

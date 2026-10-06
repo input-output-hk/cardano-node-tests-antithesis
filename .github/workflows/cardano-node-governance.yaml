@@ -302,6 +302,7 @@ jobs:
         CMD_ERA=$(grep -oP 'GOV_COMMAND_ERA: \$\{GOV_COMMAND_ERA:-\K[a-z]+' "$COMPOSE" | head -1)
         GOV_CLI_IMG=$(grep -oP 'gov-cli@sha256:[0-9a-f]+' "$COMPOSE" | head -1)
         GOV_CONFIGURATOR_IMG=$(grep -oP 'gov-configurator@sha256:[0-9a-f]+' "$COMPOSE" | head -1)
+        TX_FIREHOSE_IMG=$(grep -oP 'tx-firehose@sha256:[0-9a-f]+' "$COMPOSE" | head -1)
 
         {
           echo "### Antithesis test run"
@@ -315,4 +316,5 @@ jobs:
           echo "- protocol version: $PROTOCOL_VER, command era: $CMD_ERA"
           echo "- gov-cli: \`$GOV_CLI_IMG\`"
           echo "- gov-configurator: \`$GOV_CONFIGURATOR_IMG\`"
+          echo "- tx-firehose: \`$TX_FIREHOSE_IMG\`"
         } >> "$GITHUB_STEP_SUMMARY"

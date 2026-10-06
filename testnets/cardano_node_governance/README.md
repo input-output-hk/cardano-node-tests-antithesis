@@ -10,7 +10,7 @@ Conway **governance** workload under Antithesis fault injection.
 | `relay1` | relay | excluded | stable query/submit endpoint |
 | `gov-cli` | cardano-cli driver host | excluded | sleeps; Antithesis execs the governance drivers |
 | `gov-configurator` | one-shot init | n/a | cardonnay genesis + governance assets |
-| `tx-firehose` | Leios load generator | excluded | same image as `gov-cli`; idles unless `protocolVersion >= 12` |
+| `tx-firehose` | Leios load generator | excluded | own image; idles unless `protocolVersion >= 12` |
 | `tracer`, `tracer-sidecar`, `log-tailer`, `sidecar` | support | excluded | reused from master |
 
 Three block producers run under fault injection, so a network
@@ -27,13 +27,22 @@ Dijkstra node boots and survives faults, not that Leios's throughput
 mechanism does - upstream's `test_leios_blocks.py` skips itself outright
 when no generator is enabled, for the same reason.
 
-The `tx-firehose` service runs the **same image and digest** as
-`gov-cli` with its entrypoint overridden to `/tx-firehose.sh`; the
-binary is built from `LEIOS_NODE_REV` in that image's nix stage, so the
-generator, the cli and the node all come from one commit.
+The `tx-firehose` service has **its own image**
+(`components/tx-firehose/`), built from `LEIOS_NODE_REV` so the
+generator, the cli it queries with and the node it submits to all come
+from one commit.
+
+It deliberately does not reuse the `gov-cli` image, even though that one
+already has the same nix stage. Antithesis discovers test commands per
+container by the presence of `/opt/antithesis/test/v1`, so a second
+container running the `gov-cli` image became a second place the
+governance drivers were scheduled - against this service's read-only
+`/gov-data`, where they aborted. That failed run `37252534099`. An image
+that hosts the drivers cannot be reused for a container that must not
+run them.
 
 It follows the generated genesis rather than a switch of its own:
-`/tx-firehose.sh` reads `protocolVersion.major` out of
+its `/entrypoint.sh` reads `protocolVersion.major` out of
 `gov-state/shelley/genesis.json` and submits only when it is `>= 12`,
 idling in Conway. That is deliberate - a second env switch flipped
 alongside `PROTOCOL_VERSION` could disagree with it, silently either
@@ -48,7 +57,7 @@ losing the Leios coverage or putting load on the Conway baseline.
 | `TX_MAX_CONSECUTIVE_ERRORS` | `50` | rejects tolerated before it exits and is restarted |
 
 Only `TX_FIREHOSE` is wired as a passthrough; the rest are read from the
-environment by `/tx-firehose.sh` but not listed in the service, so
+environment by `/entrypoint.sh` but not listed in the service, so
 changing one means editing the `tx-firehose` service's `environment:`
 block. A run dispatched through moog gets the committed values either
 way - moog passes no environment of its own.
@@ -62,9 +71,16 @@ cardonnay's own `tx-generator` or `tx-centrifuge` would race it for that
 same key.
 
 Expect restarts: the generator caches its fund set at startup, so every
-reorg invalidates it and it exits once
-`--max-consecutive-errors` is hit. `/tx-firehose.sh` restarts it with a
-fresh fund set and never gives up, so that cycle is normal here.
+reorg invalidates it and it exits once `--max-consecutive-errors` is
+hit. `/entrypoint.sh` restarts it with a fresh fund set and never gives
+up, so that cycle is normal here.
+
+In Conway the container still starts and idles - compose has no
+conditional services, and `profiles:` is not usable because moog selects
+none, so a profiled service would never start in either mode. It submits
+nothing there, but it is not invisible to Conway runs: it is a container
+in the topology, which is precisely how the driver-scheduling problem
+above reached Conway.
 
 ## Genesis + assets (cardonnay)
 

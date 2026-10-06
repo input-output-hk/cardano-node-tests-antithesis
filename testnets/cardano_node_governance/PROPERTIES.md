@@ -223,7 +223,7 @@ happened, with no Always invariant.
 Leios-only: in Conway the load generator is inert by design, so this
 driver asserts nothing at all there rather than leaving an unfired
 Sometimes as noise. It gates on `protocolVersion.major` in the generated
-genesis — the same artifact `tx-firehose.sh` gates on, so the two cannot
+genesis — the same artifact the generator's entrypoint gates on, so they cannot
 disagree about whether load is expected.
 
 | Assertion | Type | Meaning |

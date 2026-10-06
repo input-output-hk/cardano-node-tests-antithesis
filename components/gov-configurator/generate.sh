@@ -213,7 +213,7 @@ cp "${STATE}/shelley/genesis-utxo."* /gov-data/faucet/
 # cold-start guard, and a never-firing Sometimes is a coverage gap
 # rather than a failure. That is a silently green run in which nothing
 # was exercised, which is far worse than a missing load generator.
-# tx-firehose.sh does its own check and says so loudly.
+# The tx-firehose entrypoint does its own check and says so loudly.
 if [ "$PROTOCOL_VERSION" -ge 12 ]; then
     if [ -f "${STATE}/shelley/genesis-utxo2.skey" ]; then
         mkdir -p /gov-data/tx-firehose

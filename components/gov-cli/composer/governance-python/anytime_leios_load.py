@@ -37,7 +37,7 @@ from cardano_clusterlib import clusterlib
 
 WINDOW = int(os.environ.get("LEIOS_LOAD_WINDOW", "20"))
 
-# Staged by gov-configurator, Leios only. Same path tx-firehose.sh reads.
+# Staged by gov-configurator, Leios only. Same path the generator reads.
 ADDR_FILE = g.GOV / "tx-firehose" / "genesis-utxo2.addr"
 
 # The era the load generator is meant for; below this it is inert.
@@ -46,7 +46,7 @@ LEIOS_PROTOCOL_MAJOR = 12
 
 def _protocol_major() -> int | None:
     """Protocol version from the generated genesis - the same artifact
-    tx-firehose.sh gates on, so the two can never disagree about whether
+    the tx-firehose entrypoint gates on, so they can never disagree about
     load is expected."""
     try:
         genesis = json.loads((g.GOV_STATE_DIR / "shelley" / "genesis.json").read_text())

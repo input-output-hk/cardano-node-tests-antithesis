@@ -184,25 +184,26 @@ services:
       gov-configurator:
         condition: service_completed_successfully
 
-  # Leios load generator. Deliberately the *same image and digest* as
-  # gov-cli - the binary is built in its Dockerfile's nix stage - with
-  # the entrypoint overridden. That keeps one nix builder stage, one
-  # /nix/store layer and one image pull, while still being a real
-  # separate container with its own restart policy and logs.
-  # push-gov-images.sh's re-pin sed is global, so it rewrites this
-  # digest and gov-cli's together; they must never diverge.
+  # Leios load generator.
+  #
+  # Its own image, NOT gov-cli's. Reusing gov-cli's image put
+  # /opt/antithesis/test/v1/governance in this container too, and
+  # Antithesis discovers test commands per container - so it scheduled
+  # the governance drivers here as well, where they hit the read-only
+  # /gov-data below and aborted. That failed run 37252534099 in Conway,
+  # and would have failed Leios identically: the gate below controls
+  # whether the generator submits, not which containers run drivers.
   #
   # Leios endorser blocks only certify transactions that are actually in
   # the mempool, and the governance drivers submit ~one tx per composer
   # tick. Without this, a Leios run only proves the node boots.
-  # /tx-firehose.sh follows the generated genesis: it submits only when
+  # /entrypoint.sh follows the generated genesis: it submits only when
   # protocolVersion.major >= 12 and idles in Conway, so there is no
   # second switch that could disagree with PROTOCOL_VERSION above.
   tx-firehose:
-    image: ghcr.io/saratomaz/cardano-node-tests-antithesis/gov-cli@sha256:4acc27ecf7d8befb9f460b0a36ecc68a52c24a166d366c6d3ede558ccad6a390
+    image: ghcr.io/saratomaz/cardano-node-tests-antithesis/tx-firehose@sha256:0000000000000000000000000000000000000000000000000000000000000000
     container_name: tx-firehose
     hostname: tx-firehose.example
-    entrypoint: ["/tx-firehose.sh"]
     # Load must be a stable backdrop, not a fault target: if this could
     # be paused or killed, an EB-certification failure under a network
     # fault would be indistinguishable from "the load stopped".
