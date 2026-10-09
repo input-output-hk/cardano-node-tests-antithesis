@@ -201,7 +201,7 @@ services:
   # protocolVersion.major >= 12 and idles in Conway, so there is no
   # second switch that could disagree with PROTOCOL_VERSION above.
   tx-firehose:
-    image: ghcr.io/saratomaz/cardano-node-tests-antithesis/tx-firehose@sha256:a3f8c7ac138272bb0a477690f3e7512a69c34ae279933cd99aa0da279fa9d077
+    image: ghcr.io/saratomaz/cardano-node-tests-antithesis/tx-firehose@sha256:26deb2561ae0a5a660cc8509a17d7bb81eeaed7111bcb8d12e13e4ed19c5c457
     container_name: tx-firehose
     hostname: tx-firehose.example
     # Load must be a stable backdrop, not a fault target: if this could
