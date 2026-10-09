@@ -55,6 +55,17 @@ losing the Leios coverage or putting load on the Conway baseline.
 | `TX_INPUTS_PER_TX`, `TX_OUTPUTS_PER_TX` | `1` | tx shape |
 | `TX_FEE` | `200000` | flat fee; `TxFirehose.Build.Fail` in the log means it is too low |
 | `TX_MAX_CONSECUTIVE_ERRORS` | `50` | rejects tolerated before it exits and is restarted |
+| `TX_FIREHOSE_LOG_SUBMITS` | unset | `true` keeps the per-tx success trace lines, which are dropped by default |
+
+The per-tx success lines are filtered out on purpose. tx-firehose emits
+one JSON trace per submitted transaction, and Antithesis explores many
+timelines: run `37796283946` produced 19,319,280
+`TxFirehose.Submit.Success` events and came back `Incomplete` with no
+findings verdict - the same output-volume problem `generate.sh`'s
+`TraceOptions` map exists to prevent. Rejects, errors and startup lines
+are kept. Nothing depends on the dropped lines, since
+`anytime_leios_load` proves the load ran from UTxO churn on chain rather
+than from logs.
 
 Only `TX_FIREHOSE` is wired as a passthrough; the rest are read from the
 environment by `/entrypoint.sh` but not listed in the service, so

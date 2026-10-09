@@ -30,6 +30,22 @@ OUTPUTS_PER_TX="${TX_OUTPUTS_PER_TX:-1}"
 FEE="${TX_FEE:-200000}"
 MAX_ERRORS="${TX_MAX_CONSECUTIVE_ERRORS:-50}"
 
+# tx-firehose emits one JSON trace line per submitted transaction. At 15
+# tps that is ~160k lines per timeline, but Antithesis explores many
+# branches: run 37796283946 produced 19,319,280 TxFirehose.Submit.Success
+# events and came back Incomplete, with no findings verdict at all. That
+# is the same failure mode generate.sh's TraceOptions map exists to
+# prevent - an output firehose Antithesis cannot materialize. So the
+# per-tx success lines are dropped by default and everything else
+# (rejects, errors, exits) is kept. Nothing depends on them:
+# anytime_leios_load proves the load ran from UTxO churn on chain, not
+# from logs. Set TX_FIREHOSE_LOG_SUBMITS=true to keep them when
+# debugging locally.
+case "${TX_FIREHOSE_LOG_SUBMITS:-}" in
+    true|True|TRUE|1|yes) NOISE='' ;;
+    *) NOISE='TxFirehose.Submit.Success' ;;
+esac
+
 log() { echo "tx-firehose: $*"; }
 
 # Permanent misconfiguration. Exiting non-zero here would not be a
@@ -164,6 +180,10 @@ HEALTHY_RUN=10
 
 while true; do
     STARTED=$SECONDS
+    # 2>&1 | grep, with the status recovered from PIPESTATUS[0] rather
+    # than $? - $? would be grep's. A pipe rather than process
+    # substitution so no output can be lost to the shell not waiting on
+    # the substituted process.
     tx-firehose \
         --socket-path "$SOCKET" \
         --testnet-magic "$MAGIC" \
@@ -172,8 +192,9 @@ while true; do
         --inputs-per-tx "$INPUTS_PER_TX" \
         --outputs-per-tx "$OUTPUTS_PER_TX" \
         --fee "$FEE" \
-        --max-consecutive-errors "$MAX_ERRORS"
-    RC=$?
+        --max-consecutive-errors "$MAX_ERRORS" 2>&1 \
+        | { if [ -n "$NOISE" ]; then grep --line-buffered -v "$NOISE"; else cat; fi; }
+    RC=${PIPESTATUS[0]}
     RAN=$((SECONDS - STARTED))
 
     if [ "$RAN" -ge "$HEALTHY_RUN" ]; then
