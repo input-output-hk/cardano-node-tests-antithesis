@@ -235,11 +235,13 @@ disagree about whether load is expected.
 `leios_load_observed` is the answer to "did the load actually happen".
 Never going green across a Leios run means the generator was dead,
 idling or disabled, so nothing in that run says anything about Leios
-under fault injection — however green the rest of the report looks. Only
-the positive observation is asserted: the UTxO set legitimately holds
-still while the chain is stalled under faults, which is a normal and
-frequent state here, so asserting on "no change" would flag the fault
-injection working as intended.
+under fault injection — however green the rest of the report looks.
+
+It is emitted on every sample with the real condition, not only when
+true. A Sometimes only has to hold once per run, so the False samples
+during a stall cost nothing, and registering it every tick is what makes
+a dead generator show up as a never-satisfied must-hit rather than as an
+absent property nobody notices.
 
 ## `eventually_votes_recorded.py` — post-fault recovery check
 

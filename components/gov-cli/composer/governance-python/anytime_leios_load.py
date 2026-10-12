@@ -100,22 +100,26 @@ def main() -> int:
     except Exception:  # noqa: BLE001
         return 0
 
-    # Only a positive observation is reported. The set legitimately holds
-    # still while the chain is stalled under fault injection, which is a
-    # normal and frequent state here - asserting on "no change" would
-    # flag the fault injection working as intended.
-    if before != after:
-        sdk.sometimes(
-            True,
-            "leios_load_observed",
-            {
-                "window_s": WINDOW,
-                "utxos_before": len(before),
-                "utxos_after": len(after),
-                "spent": len(before - after),
-                "created": len(after - before),
-            },
-        )
+    # Emitted on every sample with the real condition, not only when it
+    # is true. A Sometimes only has to hold once per run, so a False
+    # sample costs nothing - the set legitimately holds still while the
+    # chain is stalled under faults, which is normal and frequent here.
+    # But emitting only the true case meant a dead generator never
+    # registered the property at all, so it could not fail: exactly the
+    # case this driver exists to catch. Registering it every tick is what
+    # turns "never observed" into a failing must-hit instead of silence.
+    changed = before != after
+    sdk.sometimes(
+        changed,
+        "leios_load_observed",
+        {
+            "window_s": WINDOW,
+            "utxos_before": len(before),
+            "utxos_after": len(after),
+            "spent": len(before - after),
+            "created": len(after - before),
+        },
+    )
 
     return 0
 
