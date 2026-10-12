@@ -289,6 +289,35 @@ for ((i = 1; i <= NUM_POOLS; i++)); do
     # severity discipline (Silence/throttle the high-frequency
     # namespaces, keep forge/fork/peer events visible), plus silence
     # ChainDB.ImmDbEvent chunk-validation replay spam.
+    #
+    # Consensus.LeiosKernel is raised to Info so endorser-block activity
+    # is visible at all. It is a real registered namespace on the Leios
+    # node - its runtime tracer list carries Consensus.LeiosKernel and
+    # Consensus.LeiosPeer, plus the already-silent LeiosFetch.Remote and
+    # LeiosNotify.Remote - but it had no entry here, so it inherited the
+    # root Notice and every EB event, all of which are Info, was dropped.
+    #
+    # Its .Msg child is silenced: that is 62% of the volume and is
+    # protocol chatter ("leiosFetchLogic: wait for leios ready"), while
+    # the semantic events are the ones that answer whether Leios is doing
+    # anything - BlockForged carries ebSize and numTxs, alongside
+    # BlockAnnounced, BlockAcquired, VoteScheduled and NotVoted.
+    #
+    # Measured on a local Leios cluster under 15 tps: 106 events in 90s
+    # across 4 nodes including .Msg, so ~0.5/s cluster-wide without it -
+    # far below the per-tx stream that made run 37796283946 Incomplete,
+    # though not measured under fault injection, which would make the
+    # error paths (FetchDecision, BlockPointMissing) chattier. If it ever
+    # does bite, those two take a maxFrequency cap like the ChainDB
+    # entries above.
+    #
+    # The volume is load-proportional, which bounds that risk: the same
+    # cluster with no tx source emits zero LeiosKernel events in 150s
+    # while still producing 86 blocks. That control is also why these
+    # events are worth having - endorser blocks are forged only when
+    # transactions actually flow (BlockForged carried numTxs=180 under
+    # load), so they report something the chain itself does not.
+    # A no-op in Conway, where the namespace never fires.
     jq '
         .ByronGenesisFile   = "byron-genesis.json"
       | .ShelleyGenesisFile = "shelley-genesis.json"
@@ -312,6 +341,8 @@ for ((i = 1; i <= NUM_POOLS; i++)); do
           "ChainDB.CopyToImmutableDBEvent.CopiedBlockToImmutableDB": {"maxFrequency": 2},
           "ChainDB.ImmDbEvent": {"severity": "Silence"},
           "ChainSync.Client": {"severity": "Warning"},
+          "Consensus.LeiosKernel": {"severity": "Info"},
+          "Consensus.LeiosKernel.Msg": {"severity": "Silence"},
           "Forge.Loop": {"severity": "Info"},
           "Forge.StateInfo": {"severity": "Info"},
           "Mempool": {"severity": "Silence"},
