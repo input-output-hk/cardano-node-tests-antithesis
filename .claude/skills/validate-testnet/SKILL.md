@@ -15,7 +15,7 @@ script was packaged, nothing more. Only step 1 below actually runs it.
 
 **`docker compose build` does nothing here** — no service has a `build:` section. `docker compose
 up` therefore runs the pinned image, **not your working tree**. To test an uncommitted change to
-`components/`, see "Testing a local change" below.
+`components/`, apply "Testing a local change" below **before step 1**.
 
 **A second `up` is a silent no-op.** `generate.sh` guards on a `/gov-data/.generated` marker, so it
 skips regeneration and exits 0 without doing anything. Always `docker compose down -v` first when
@@ -45,7 +45,7 @@ derives epoch length from k assuming `f=0.1` and aborts if the spec disagrees.
 ## 2. Pool-only liveness — the assumption most worth checking
 
 ```bash
-docker compose up p1 p2 p3 relay1
+docker compose up -d p1 p2 p3 relay1
 ```
 
 Confirm the chain produces blocks with no BFT node: `cardano-cli query tip` must advance. This is
@@ -54,7 +54,11 @@ the single biggest assumption in the setup. If it stalls, the fallback is adding
 
 ## 3. Drivers by hand
 
+Start the sleeping CLI container before using `exec`; the node startup in step 2 does not
+start it.
+
 ```bash
+docker compose up -d gov-cli
 docker compose exec gov-cli python3 /opt/antithesis/test/v1/governance/first_setup.py
 # then a create/vote driver, e.g.
 docker compose exec gov-cli python3 /opt/antithesis/test/v1/governance/parallel_driver_create_action.py
@@ -78,20 +82,35 @@ Leaving volumes behind means the next run silently skips generation (see the thi
 
 ## Testing a local change before pushing
 
-Because compose pins digests, you must build and override:
+Because compose pins digests, build the changed components and override their images **before
+step 1**. The example below builds both governance images, covering configurator and driver
+changes together. For a change confined to one component, build and override only that service
+and adjust the image check accordingly.
+
+Run these commands from `testnets/cardano_node_governance/`. Preserve any existing override
+file rather than overwriting it:
 
 ```bash
 docker build --platform linux/amd64 -t gov-configurator:local ../../components/gov-configurator
+docker build --platform linux/amd64 -t gov-cli:local ../../components/gov-cli
 cat > docker-compose.override.yaml <<'YAML'
 services:
   gov-configurator:
     image: gov-configurator:local
+  gov-cli:
+    image: gov-cli:local
 YAML
-docker compose config | grep -A1 'gov-configurator:' | grep image   # confirm the swap
+docker compose config --format json | jq -e '
+  .services
+  | .["gov-configurator"].image == "gov-configurator:local"
+    and .["gov-cli"].image == "gov-cli:local"
+'   # fails if either service still uses the pinned digest
 ```
 
 Compose merges `docker-compose.override.yaml` automatically. **Delete it when done** — it is not
-gitignored, and committing it would override the pinned digest for everyone, including Antithesis.
+gitignored, and committing it would override the pinned digests for everyone, including Antithesis.
+If you merged into an existing override, remove only your local image overrides. Rebuild after
+further source edits and repeat steps 1–3 so the containers and setup state use the new code.
 
 The alternative is to push and let CI rebuild and re-pin, then pull and run the new digest. That
 works but costs a build per iteration, so prefer the override while iterating.
