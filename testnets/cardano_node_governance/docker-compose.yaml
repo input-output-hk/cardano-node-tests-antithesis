@@ -175,6 +175,8 @@ services:
       - relay1-state:/state:ro
       - gov-data:/gov-data
       - gov-state:/gov-state
+      # Read-only Leios endorser-block coverage probe; inert in Conway.
+      - tracer:/tracer:ro
     tmpfs:
       - /work
     restart: always

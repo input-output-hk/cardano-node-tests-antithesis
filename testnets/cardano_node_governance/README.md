@@ -67,6 +67,16 @@ are kept. Nothing depends on the dropped lines, since
 `anytime_leios_load` proves the load ran from UTxO churn on chain rather
 than from logs.
 
+`anytime_leios_endorser` separately witnesses Leios propagation during
+Antithesis exploration: after setup, a producer must acquire a nonempty
+endorser block forged by another producer, matching its hash and slot.
+It reads bounded tails of the tracer's JSON files through a read-only
+mount and requires a fresh acquisition during a 20-second sample. This
+is a Sometimes coverage property, so partitions can interrupt individual
+samples; it does not assert sustained TPS, a recovery deadline or EB
+certification. Both `leios` and `leios-latest` enable it through their
+v12 genesis. Conway emits no SDK properties from this probe.
+
 Only `TX_FIREHOSE` is wired as a passthrough; the rest are read from the
 environment by `/entrypoint.sh` but not listed in the service, so
 changing one means editing the `tx-firehose` service's `environment:`

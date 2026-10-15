@@ -16,8 +16,9 @@ Antithesis groups these the same way in a report's **Properties** panel:
 Every driver also emits `<name>_exits_zero` (Always) and `<name>_aborted`
 (Unreachable) via the shared `helper_sdk.run_driver` wrapper — omitted
 below since they're identical scaffolding, not test-specific behavior.
-`first_setup.py` is the one driver that doesn't emit `setup_exits_zero`
-(a pre-existing gap, kept as-is — see the driver-simplification commit).
+`first_setup.py` doesn't emit `setup_exits_zero` (a pre-existing gap,
+kept as-is — see the driver-simplification commit). The Leios endorser
+probe suppresses all its SDK properties, including scaffolding, in Conway.
 
 **Reading a red Leios report:** in Leios mode the `tx-firehose` service
 puts sustained transaction load on `relay1`, which every driver queries.
@@ -242,6 +243,34 @@ true. A Sometimes only has to hold once per run, so the False samples
 during a stall cost nothing, and registering it every tick is what makes
 a dead generator show up as a never-satisfied must-hit rather than as an
 absent property nobody notices.
+
+## `anytime_leios_endorser.py`: endorser-block propagation coverage
+
+Only `leios` and `leios-latest`: the generated genesis protocol major
+must be at least 12. Conway emits none of this driver's SDK properties.
+
+| Assertion | Type | Meaning |
+|---|---|---|
+| `leios_endorser entered` | Reachable | Leios endorser probe ran |
+| `leios_nonempty_eb_propagated` | Sometimes | A producer forged an EB with `numTxs > 0` and another producer freshly acquired the same EB hash and slot during a probe window after setup |
+| `leios_endorser_exits_zero` | Always | Leios probe completed normally |
+| `leios_endorser_aborted` | Unreachable | Leios probe raised an unexpected exception |
+
+This is an Antithesis coverage witness, not a throughput target or a
+deadline on fault recovery. A partition can stop propagation for any
+individual sample. The property is emitted with False on samples with
+no match (including missing traces), so absent evidence cannot silently
+remove it from a Leios report. False samples during setup do not count
+startup traffic as evidence of exploration.
+
+The driver reads the shared tracer volume read-only, matching
+`Consensus.LeiosKernel.BlockForged` to `BlockAcquired` across producers.
+It samples new acquisition records over 20 seconds, with up to 2 MiB
+read per log file per pass. Old acquisition records, self-acquisition,
+empty EBs, warnings and vote-scheduling events cannot satisfy it.
+Matching hashes across a fork is still coverage, not evidence of
+canonical-chain inclusion or successful certification. No shared cursor
+or persistent observation state is needed between driver invocations.
 
 ## `eventually_votes_recorded.py` — post-fault recovery check
 
