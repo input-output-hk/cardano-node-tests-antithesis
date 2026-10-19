@@ -83,52 +83,82 @@ exercises the enactment/treasury-debit path the InfoAction workload
 deliberately skips. `transfer_amt` is kept small (1-5 ADA) so a long run
 can't meaningfully drain the treasury even with many enactments.
 
+Receiver 1 is reserved for a guided proposal, prioritised before the random
+receivers. All treasury drivers share a nonblocking `fcntl` lock. The creator
+journals the signed transaction's id before broadcasting and bounds its
+validity to one epoch, so an interrupted submission remains attributable and
+cannot arrive after its claim is reclaimed. Journal updates are atomic.
+
 | Assertion | Type | Meaning |
 |---|---|---|
 | `create_treasury_withdrawal entered` | Reachable | driver ran |
 | `create_treasury_withdrawal_node_not_ready` | Unreachable | node never answered within the wait budget |
 | `treasury_withdrawal_created` | Sometimes (True and False variants) | coverage of both submit outcomes |
+| `treasury_withdrawal_query_unavailable` | Sometimes | a treasury query failed, returned an unusable schema, or could not acquire a consistent snapshot; claims remain pending |
 | `gov_op_under_perturbation` (`op: create_treasury_withdrawal`) | Sometimes | a treasury withdrawal action landed while the chain was recently stalled |
 
-## `parallel_driver_vote_treasury_withdrawal.py` — cast one DRep/CC vote
+## `parallel_driver_vote_treasury_withdrawal.py` — guided approval and random DRep/CC votes
 
 Restricted to DRep and CC voters — cardano-node-tests' own
 `test_enact_treasury_withdrawals` confirms the CLI rejects an SPO vote on
 this action type with a `StakePoolVoter` error, so SPOs are left out of
 the roster rather than submitted and expected to fail.
 
+The guided proposal gets all missing YES votes in one transaction, using the
+recorded vote for each specific credential. Its votes are never overwritten by
+the random lane. Other proposals retain YES/NO/ABSTAIN selection, concentrated
+on at most three expiring actions and preferentially choosing an unrecorded
+voter. All live proposals are checked for participation, independently of a
+new submission succeeding. Headcounts are coverage, not governance approval:
+actual stake-weighted DRep and committee thresholds are checked by the ledger,
+whose ratification result is observed below.
+
 | Assertion | Type | Meaning |
 |---|---|---|
 | `vote_treasury_withdrawal entered` | Reachable | driver ran |
-| `vote_treasury_withdrawal_node_not_ready` | Unreachable | node never answered within the wait budget |
 | `treasury_withdrawal_actions_live` | Sometimes | ≥1 votable treasury withdrawal action existed in gov-state |
 | `treasury_withdrawal_vote_transient_failure` | Sometimes | a vote submit failed transiently (retried next tick) |
 | `treasury_withdrawal_vote_submitted` | Reachable | a vote was actually submitted |
-| `treasury_withdrawal_vote_recorded_<kind>` | Sometimes | that voter kind's (drep/cc) vote was recorded |
+| `treasury_withdrawal_vote_recorded_<kind>` | Sometimes | the specific submitted credential's decision was recorded |
 | `treasury_withdrawal_vote_decision_<yes\|no\|abstain>` | Sometimes | that decision was cast at least once |
 | `treasury_withdrawal_vote_decision_<decision>_by_<kind>` | Sometimes | that decision/voter-kind combination occurred |
 | `treasury_withdrawal_voted_by_drep_and_cc` | Sometimes | a single action got votes from both roles |
-| `treasury_withdrawal_majority_reached` | Sometimes | a single action's votes crossed the majority threshold |
+| `treasury_withdrawal_majority_reached` | Sometimes | a single action has at least ceil((NUM_DREPS + NUM_CC)/2) recorded votes of any decision; participation only, not ratification |
+| `treasury_withdrawal_guided_votes_recorded` | Sometimes | all available guided DRep/CC credentials have recorded YES votes |
 | `gov_op_under_perturbation` (`op: vote_treasury_withdrawal`) | Sometimes | a vote landed while the chain was recently stalled |
 
 ## `anytime_treasury_withdrawal_enactment.py` — runs continuously, including under faults
 
-Pairs with the create driver above: confirms every treasury withdrawal
-this repo submitted, once it leaves the live set, actually settled its
-funds-receiving reward account correctly - not just that the action
-disappeared from gov-state. `treasury_withdrawal_no_overpay` is the
-reason this driver exists: it's what would catch a crash between
-ratification and payout getting retried on recovery and paying out
-twice.
+Pairs with the creator above. Governance and recipient balance are read at
+the immutable tip, with matching tip hashes before and after the queries.
+An unavailable query, unregistered recipient or advancing snapshot is unknown,
+not an empty proposal set or zero balance. A claim is resolved only when its
+action is absent from both volatile and immutable governance and the immutable
+slot has passed its submission validity bound. Claims abandoned before the
+pre-broadcast journal are reclaimable after two immutable epochs.
+
+`nextRatifyState.enactedGovActions` supplies the ratification witness. Once
+that immutable approval is followed by a terminal action in a later epoch,
+the recipient must have received exactly the requested amount. A terminal
+action without observed ratification may have expired or never been included.
+The guided recipient remains reserved after payout and is checked throughout
+the run, including for delayed double payments.
+
+The majority, guided-YES, ratification and payout Sometimes properties are
+emitted false before their success paths, so an unexercised phase stays visible
+and fails coverage. The treasury workload applies to both Conway and Dijkstra;
+it does not change the Leios-only gates of the load and EB probes.
 
 | Assertion | Type | Meaning |
 |---|---|---|
 | `treasury_withdrawal_enactment entered` | Reachable | checker ran |
-| `treasury_withdrawal_enactment_unavailable` | Unreachable | node didn't answer a gov-state query (absorbed, not flagged) |
+| `treasury_withdrawal_query_unavailable` | Sometimes | retryable query/snapshot failure; no claim is resolved from unavailable state |
 | `treasury_withdrawal_slot_reclaimed_after_abandonment` | Sometimes | a funds-receiving claim outlived a create-driver process that died mid-submit, and was self-healed |
-| `treasury_withdrawal_enacted_correctly` | Sometimes | a resolved withdrawal's reward balance increased by at least the transferred amount |
+| `treasury_withdrawal_ratified` | Sometimes | the ledger reports a tracked treasury action ratified at the immutable tip |
+| `treasury_withdrawal_enacted_correctly` | Sometimes | an immutable, terminal withdrawal's recipient balance increased by exactly the transferred amount |
 | `treasury_withdrawal_resolved_without_payout` | Sometimes | a withdrawal left the live set (rejected/expired) without a payout landing |
-| `treasury_withdrawal_no_overpay` | **Always** | a resolved withdrawal's reward-balance delta never exceeds the amount it transferred - catches a double payout on fault-recovery |
+| `treasury_withdrawal_no_overpay` | **Always** | a pending or retained guided claim's immutable balance delta is between zero and its transfer amount |
+| `treasury_withdrawal_payout_matches_ratification` | **Always** | a terminal action with immutable ratification evidence paid exactly its transfer amount in a later epoch |
 
 ## `parallel_driver_create_pparam_update.py` — submit one ParameterChange action
 

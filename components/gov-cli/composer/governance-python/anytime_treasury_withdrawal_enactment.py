@@ -1,97 +1,93 @@
 #!/usr/bin/env python3
-"""anytime_treasury_withdrawal_enactment.py — verify each treasury
-withdrawal this repo submitted actually paid out at most once.
+"""Observe ledger ratification and settled treasury payouts under faults.
 
-May run at any time, including under fault injection. Pairs with
-parallel_driver_create_treasury_withdrawal.py, which claims one
-vote_stake_addr{i} as a withdrawal's funds-receiving target (at most one
-pending withdrawal per address at a time, via helper_gov.claim_recv_slot)
-and records its pre-submission reward-account balance.
-
-Once the claimed action has left the live TreasuryWithdrawals set
-(ratified+enacted, rejected, or expired), the reward-account balance is
-what distinguishes those outcomes - and catches the fault-injection bug
-this driver exists for: a crash between ratification and payout that
-gets retried on recovery and pays out twice. The create/vote drivers
-only ever observe that an action left gov-state, never whether the
-treasury actually settled correctly afterwards.
-
-A claim that never got a txid recorded (the create driver was killed
-between claiming the slot and finishing the submit) is reclaimed after
-one full epoch, so a process kill can't permanently strand a
-funds-receiving slot.
+Only a consistent immutable snapshot can resolve a claim. The guided receiver
+stays reserved after payout, allowing later ticks to detect a delayed duplicate
+payment. Unavailable queries leave claims untouched for another tick.
 """
 
 from __future__ import annotations
 
+import sys
+
 import helper_gov as g
 import helper_sdk as sdk
+import helper_treasury as treasury
+from cardano_clusterlib import clusterlib
 
 STALE_CLAIM_EPOCHS = 2
 
 
+def observe(cluster: clusterlib.ClusterLib, idx: int, record: dict, live: dict) -> None:
+    if "txid" not in record:
+        # No broadcast occurred: the action id is journalled before submission.
+        tip = treasury.query(cluster, ["tip"], immutable=True)
+        if tip["epoch"] - record["claimed_epoch"] >= STALE_CLAIM_EPOCHS:
+            g.release_recv_slot(idx)
+            sdk.sometimes(True, "treasury_withdrawal_slot_reclaimed_after_abandonment")
+        return
+
+    txid, ix = record["txid"], record["ix"]
+    tip, state, balance = treasury.immutable_snapshot(cluster, record["recv_addr"])
+    delta = balance - record["pre_balance"]
+    expected = record["transfer_amt"]
+    details = {"txid": txid, "delta": delta, "expected": expected, "immutable_slot": tip["slot"]}
+    sdk.always(0 <= delta <= expected, "treasury_withdrawal_no_overpay", details)
+
+    ratified = state["nextRatifyState"]["enactedGovActions"]
+    if any(treasury.action_id(p) == (txid, ix) for p in ratified):
+        # This is the ledger's stake-weighted DRep + CC decision, not a
+        # headcount approximation. Immutable evidence survives rollbacks.
+        g.complete_recv_slot(idx, ratified_epoch=tip["epoch"])
+        record["ratified_epoch"] = tip["epoch"]
+        sdk.sometimes(True, "treasury_withdrawal_ratified", {"txid": txid})
+
+    if treasury.find_action(state, txid, ix) or treasury.find_action(live, txid, ix):
+        return
+    # An uncertain submission is terminal only once a delayed inclusion is
+    # impossible at the immutable tip.
+    if tip["slot"] < record["valid_until"]:
+        return
+    if "ratified_epoch" in record:
+        if tip["epoch"] <= record["ratified_epoch"]:
+            return
+        sdk.always(delta == expected, "treasury_withdrawal_payout_matches_ratification", details)
+
+    paid = delta == expected
+    sdk.sometimes(paid, "treasury_withdrawal_enacted_correctly", details)
+    sdk.sometimes(not paid, "treasury_withdrawal_resolved_without_payout", details)
+    if idx == treasury.GUIDED_RECEIVER and paid:
+        # Keep checking this recipient for the rest of the run. Reusing it
+        # would hide a late duplicate in the next claim's baseline.
+        return
+    g.release_recv_slot(idx)
+
+
 def main() -> int:
     sdk.reachable("treasury_withdrawal_enactment entered")
-
     if not g.SETUP_MARKER.exists():
         return 0
-
+    # Register even if no proposal ever reaches the corresponding phase.
+    sdk.sometimes(False, "treasury_withdrawal_ratified")
+    sdk.sometimes(False, "treasury_withdrawal_enacted_correctly")
     cluster = g.make_cluster()
-    try:
-        epoch = g.current_epoch(cluster)
-        live_ids = {
-            (p["actionId"]["txId"], p["actionId"]["govActionIx"])
-            for p in g.live_treasury_withdrawal_actions(cluster)
-        }
-    except Exception:  # noqa: BLE001
-        sdk.unreachable("treasury_withdrawal_enactment_unavailable")
-        return 0
-
-    for idx, record in g.pending_recv_slots():
+    with treasury.lock() as locked:
+        if not locked:
+            return 0
         try:
-            if "txid" not in record:
-                if epoch - record.get("claimed_epoch", epoch) >= STALE_CLAIM_EPOCHS:
-                    g.release_recv_slot(idx)
-                    sdk.sometimes(True, "treasury_withdrawal_slot_reclaimed_after_abandonment")
-                continue
-
-            if (record["txid"], record["ix"]) in live_ids:
-                continue  # still pending ratification/expiry
-
-            current_balance = cluster.g_query.get_stake_addr_info(
-                record["recv_addr"]
-            ).reward_account_balance
-            transfer_amt = record["transfer_amt"]
-            delta = current_balance - record["pre_balance"]
-
-            if delta >= transfer_amt:
-                sdk.sometimes(
-                    True,
-                    "treasury_withdrawal_enacted_correctly",
-                    {"delta": delta, "expected": transfer_amt},
-                )
-            else:
-                sdk.sometimes(
-                    True,
-                    "treasury_withdrawal_resolved_without_payout",
-                    {"delta": delta, "expected": transfer_amt},
-                )
-
-            # The one true invariant here: at most one pending withdrawal is
-            # ever attached to a given recv_addr at a time, so a resolved
-            # claim's balance can only have moved by 0 (rejected/expired) or
-            # transfer_amt (enacted) - never more. A crash between
-            # ratification and payout that's retried on recovery and pays
-            # out twice would trip this.
-            sdk.always(
-                delta <= transfer_amt,
-                "treasury_withdrawal_no_overpay",
-                {"delta": delta, "expected": transfer_amt},
-            )
-
-            g.release_recv_slot(idx)
-        except Exception:  # noqa: BLE001
-            continue
+            live = treasury.gov_state(cluster)
+        except Exception as exc:  # noqa: BLE001
+            print(f"treasury governance query unavailable: {exc}", file=sys.stderr)
+            sdk.sometimes(True, "treasury_withdrawal_query_unavailable")
+            return 0
+        for prop in treasury.actions(live):
+            treasury.participation(prop)
+        for idx, record in g.pending_recv_slots():
+            try:
+                observe(cluster, idx, record, live)
+            except Exception as exc:  # noqa: BLE001
+                print(f"treasury claim {idx} snapshot unavailable: {exc}", file=sys.stderr)
+                sdk.sometimes(True, "treasury_withdrawal_query_unavailable")
     return 0
 
 

@@ -244,15 +244,19 @@ def claim_recv_slot(idx: int, pre_balance: int, claimed_epoch: int) -> bool:
 
 
 def complete_recv_slot(idx: int, **fields: tp.Any) -> None:
-    """Fill in a claimed slot with the submitted action's details
-    (recv_addr, txid, ix, transfer_amt) once build_sign_submit succeeds."""
+    """Atomically update a recipient claim while holding helper_treasury.lock.
+
+    In particular, persist txid/ix before broadcasting a signed transaction.
+    """
     path = PENDING_TREASURY_WITHDRAWALS_DIR / f"recv_{idx}.json"
     try:
         record = json.loads(path.read_text())
     except Exception:  # noqa: BLE001
         record = {}
     record.update(fields)
-    path.write_text(json.dumps(record))
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(record))
+    temporary.replace(path)
 
 
 def release_recv_slot(idx: int) -> None:
@@ -321,12 +325,16 @@ def build_sign_submit(
     signing_key_files: cabc.Sequence[pathlib.Path] = (),
     txouts: cabc.Sequence[clusterlib.TxOut] = (),
     src_addr: clusterlib.AddressRecord | None = None,
+    invalid_hereafter: int | None = None,
+    before_submit: cabc.Callable[[str], None] | None = None,
 ) -> str:
     """Build, sign, submit. Returns txid.
 
     If src_addr is provided it is used as the source/change address (caller
     holds the per-address lock). Otherwise the shared faucet is used and
     serialized on the faucet lock.
+    before_submit can journal the signed transaction id before any broadcast;
+    invalid_hereafter bounds how long an uncertain submission can still land.
     """
     fa = src_addr if src_addr is not None else faucet()
     lock_ctx = contextlib.nullcontext() if src_addr is not None else faucet_lock()
@@ -346,6 +354,7 @@ def build_sign_submit(
             change_address=fa.address,
             witness_override=len(all_signing),
             destination_dir=str(WORK),
+            **({"invalid_hereafter": invalid_hereafter} if invalid_hereafter is not None else {}),
         )
         signed = cluster.g_transaction.sign_tx(
             tx_body_file=out.out_file,
@@ -353,8 +362,13 @@ def build_sign_submit(
             tx_name=name,
             destination_dir=str(WORK),
         )
+        txid = cluster.g_transaction.get_txid(tx_body_file=out.out_file)
+        # Treasury callers journal the exact action id before broadcasting. A
+        # process killed during submission must not lose a possibly accepted tx.
+        if before_submit is not None:
+            before_submit(txid)
         cluster.g_transaction.submit_tx(tx_file=signed, txins=out.txins)
-    return cluster.g_transaction.get_txid(tx_body_file=out.out_file)
+    return txid
 
 
 def lookup_proposal(gov_state: dict, action_txid: str) -> dict | None:
