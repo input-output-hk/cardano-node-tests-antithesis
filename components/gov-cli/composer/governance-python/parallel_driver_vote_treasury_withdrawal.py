@@ -58,6 +58,7 @@ def cast(cluster: clusterlib.ClusterLib, addr: clusterlib.AddressRecord) -> int:
     voters = build_voters(cluster)
     keyed = [(voter, voter_hash(cluster, voter)) for voter in voters]
     guided_id = treasury.guided_id()
+    expiry_id = treasury.receiver_id(treasury.EXPIRY_RECEIVER)
     guided = next((p for p in props if treasury.action_id(p) == guided_id), None)
     selected = []
     if guided:
@@ -76,7 +77,7 @@ def cast(cluster: clusterlib.ClusterLib, addr: clusterlib.AddressRecord) -> int:
         vote_enum, decision = clusterlib.Votes.YES, "yes"
     else:
         # Concentrate random votes; prefer an absent vote before replacing one.
-        candidates = [p for p in props if treasury.action_id(p) != guided_id]
+        candidates = [p for p in props if treasury.action_id(p) not in (guided_id, expiry_id)]
         candidates.sort(key=lambda p: (p["expiresAfter"], treasury.action_id(p)))
         candidates = candidates[:3]
         if not candidates:

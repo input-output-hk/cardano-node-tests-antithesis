@@ -29,7 +29,7 @@ The chain supplies live actions. Recipient claims retain attribution metadata,
 including the signed action id before broadcast and a submission validity
 bound. An interrupted submission therefore remains tracked until immutable
 state proves it can be resolved. Receiver 1 is reserved for guided YES voting;
-other receivers retain the random workload.
+receiver 2 is left unvoted for expiry, and remaining receivers retain random voting.
 """
 
 from __future__ import annotations
@@ -52,11 +52,12 @@ def _claim_recv_slot(cluster: clusterlib.ClusterLib) -> tuple[int | None, str | 
     (idx, addr) or (None, None) if all NUM_DREPS slots are currently
     pending an unresolved withdrawal."""
     epoch = g.current_epoch(cluster)
-    order = list(range(2, g.NUM_DREPS + 1))
+    order = list(range(3, g.NUM_DREPS + 1))
     if order:
         start = g.rng_mod(len(order))
         order = order[start:] + order[:start]
-    order = [treasury.GUIDED_RECEIVER, *order]
+    order = [treasury.GUIDED_RECEIVER, treasury.EXPIRY_RECEIVER, *order]
+    order = [i for i in order if i <= g.NUM_DREPS]
     claimed = {idx for idx, _record in g.pending_recv_slots()}
     for i in order:
         if i in claimed:

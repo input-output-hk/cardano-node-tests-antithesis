@@ -42,7 +42,14 @@ def observe(cluster: clusterlib.ClusterLib, idx: int, record: dict, live: dict) 
         record["ratified_epoch"] = tip["epoch"]
         sdk.sometimes(True, "treasury_withdrawal_ratified", {"txid": txid})
 
-    if treasury.find_action(state, txid, ix) or treasury.find_action(live, txid, ix):
+    immutable_action = treasury.find_action(state, txid, ix)
+    if immutable_action is not None:
+        # Persist inclusion evidence; absence alone could be a failed submit.
+        expires_after = immutable_action["expiresAfter"]
+        if record.get("expires_after") != expires_after:
+            g.complete_recv_slot(idx, expires_after=expires_after)
+            record["expires_after"] = expires_after
+    if immutable_action or treasury.find_action(live, txid, ix):
         return
     # An uncertain submission is terminal only once a delayed inclusion is
     # impossible at the immutable tip.
@@ -55,7 +62,17 @@ def observe(cluster: clusterlib.ClusterLib, idx: int, record: dict, live: dict) 
 
     paid = delta == expected
     sdk.sometimes(paid, "treasury_withdrawal_enacted_correctly", details)
-    sdk.sometimes(not paid, "treasury_withdrawal_resolved_without_payout", details)
+    expired = (
+        "expires_after" in record
+        and tip["epoch"] > record["expires_after"]
+        and "ratified_epoch" not in record
+    )
+    if expired:
+        sdk.sometimes(delta == 0, "treasury_withdrawal_resolved_without_payout", details)
+        if idx == treasury.EXPIRY_RECEIVER:
+            sdk.always(delta == 0, "treasury_withdrawal_expired_no_payout", details)
+            # Keep the isolated receiver to detect a delayed erroneous payment.
+            return
     if idx == treasury.GUIDED_RECEIVER and paid:
         # Keep checking this recipient for the rest of the run. Reusing it
         # would hide a late duplicate in the next claim's baseline.
@@ -70,6 +87,7 @@ def main() -> int:
     # Register even if no proposal ever reaches the corresponding phase.
     sdk.sometimes(False, "treasury_withdrawal_ratified")
     sdk.sometimes(False, "treasury_withdrawal_enacted_correctly")
+    sdk.sometimes(False, "treasury_withdrawal_resolved_without_payout")
     cluster = g.make_cluster()
     with treasury.lock() as locked:
         if not locked:

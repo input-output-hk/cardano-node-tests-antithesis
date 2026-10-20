@@ -1,6 +1,6 @@
 """Treasury workload coordination and strict chain observations.
 
-Receiver 1 is reserved for a proposal driven towards payout. The other
+Receiver 1 is reserved for payout, receiver 2 for unvoted expiry. Remaining
 receivers keep the random voting workload. The chain remains the source of
 live actions; claim records only coordinate recipients and attribute payouts.
 """
@@ -17,6 +17,7 @@ import helper_sdk as sdk
 from cardano_clusterlib import clusterlib
 
 GUIDED_RECEIVER = 1
+EXPIRY_RECEIVER = 2
 
 
 @contextlib.contextmanager
@@ -65,11 +66,15 @@ def find_action(state: dict, txid: str, ix: int) -> dict | None:
     return next((p for p in actions(state) if action_id(p) == (txid, ix)), None)
 
 
-def guided_id() -> tuple[str, int] | None:
+def receiver_id(receiver: int) -> tuple[str, int] | None:
     for idx, record in g.pending_recv_slots():
-        if idx == GUIDED_RECEIVER and "txid" in record:
+        if idx == receiver and "txid" in record:
             return record["txid"], record["ix"]
     return None
+
+
+def guided_id() -> tuple[str, int] | None:
+    return receiver_id(GUIDED_RECEIVER)
 
 
 def participation(prop: dict) -> None:

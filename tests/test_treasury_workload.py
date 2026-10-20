@@ -122,6 +122,47 @@ class TreasuryFaultPaths(unittest.TestCase):
             self.sdk.always.call_args_list[0].args[:2], (False, "treasury_withdrawal_no_overpay")
         )
 
+    def test_failed_submission_is_not_expiry_coverage(self) -> None:
+        self.observe()
+        self.assertFalse(
+            any(
+                c.args[1] == "treasury_withdrawal_resolved_without_payout"
+                for c in self.sdk.sometimes.call_args_list
+            )
+        )
+
+    def test_immutable_inclusion_records_expiry_for_later_ticks(self) -> None:
+        self.observe(immutable=state([proposal()]))
+        self.journal["complete_recv_slot"].assert_called_once_with(1, expires_after=10)
+        self.journal["release_recv_slot"].assert_not_called()
+
+    def test_volatile_only_inclusion_is_not_expiry_evidence(self) -> None:
+        self.observe(live=state([proposal()]))
+        self.journal["complete_recv_slot"].assert_not_called()
+
+    def test_expiry_receiver_is_retained_and_late_payment_fails(self) -> None:
+        self.record["expires_after"] = 1
+        for balance in (20, 30):
+            with mock.patch.object(
+                treasury, "immutable_snapshot", return_value=(self.tip, state(), balance)
+            ):
+                checker.observe(self.cluster, treasury.EXPIRY_RECEIVER, self.record, state())
+        self.sdk.sometimes.assert_any_call(
+            True, "treasury_withdrawal_resolved_without_payout", mock.ANY
+        )
+        self.sdk.always.assert_any_call(False, "treasury_withdrawal_expired_no_payout", mock.ANY)
+        self.journal["release_recv_slot"].assert_not_called()
+
+    def test_ratified_action_does_not_count_as_expiry(self) -> None:
+        self.record.update(expires_after=1, ratified_epoch=2)
+        self.observe(balance=30)
+        self.assertFalse(
+            any(
+                c.args[1] == "treasury_withdrawal_resolved_without_payout"
+                for c in self.sdk.sometimes.call_args_list
+            )
+        )
+
     def test_unknown_query_preserves_claim_and_registers_coverage(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -183,8 +224,17 @@ class TreasuryFaultPaths(unittest.TestCase):
         guided["committeeVotes"] = {"keyHash-cc": "VoteNo"}
         self.check_selection(guided, proposal(), expected_action="action", expected_kind="cc")
 
+    def test_random_lane_never_votes_on_expiry_proposal(self) -> None:
+        guided = proposal()
+        guided["dRepVotes"] = {"keyHash-drep": "VoteYes"}
+        guided["committeeVotes"] = {"keyHash-cc": "VoteYes"}
+        expiry = proposal()
+        expiry["actionId"]["txId"] = "random"
+        with mock.patch.object(treasury, "receiver_id", return_value=("random", 0)):
+            self.check_selection(guided, expiry, expected_action=None, expected_kind=None)
+
     def check_selection(
-        self, guided: dict, other: dict, *, expected_action: str, expected_kind: str
+        self, guided: dict, other: dict, *, expected_action: str | None, expected_kind: str | None
     ) -> None:
         create_drep = mock.Mock(return_value=types.SimpleNamespace(vote_file="drep.vote"))
         create_cc = mock.Mock(return_value=types.SimpleNamespace(vote_file="cc.vote"))
@@ -208,6 +258,10 @@ class TreasuryFaultPaths(unittest.TestCase):
             ),
         ):
             self.assertEqual(voter.cast(self.cluster, mock.Mock()), 0)
+        if expected_action is None:
+            create_drep.assert_not_called()
+            create_cc.assert_not_called()
+            return
         chosen = create_drep if expected_kind == "drep" else create_cc
         rejected = create_cc if expected_kind == "drep" else create_drep
         rejected.assert_not_called()

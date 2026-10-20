@@ -92,7 +92,8 @@ exercises the enactment/treasury-debit path the InfoAction workload
 deliberately skips. `transfer_amt` is kept small (1-5 ADA) so a long run
 can't meaningfully drain the treasury even with many enactments.
 
-Receiver 1 is reserved for a guided proposal, prioritised before the random
+Receiver 1 is reserved for guided payout, and receiver 2 for an unvoted
+proposal that expires. Both are prioritised before the remaining random
 receivers. All treasury drivers share a nonblocking `fcntl` lock. The creator
 journals the signed transaction's id before broadcasting and bounds its
 validity to one epoch, so an interrupted submission remains attributable and
@@ -115,8 +116,9 @@ the roster rather than submitted and expected to fail.
 
 The guided proposal gets all missing YES votes in one transaction, using the
 recorded vote for each specific credential. Its votes are never overwritten by
-the random lane. Other proposals retain YES/NO/ABSTAIN selection, concentrated
-on at most three expiring actions and preferentially choosing an unrecorded
+the random lane. Receiver 2 never receives votes from this driver, keeping
+expiry independent of the payout path. Other proposals retain YES/NO/ABSTAIN
+selection, concentrated on at most three expiring actions and preferentially choosing an unrecorded
 voter. All live proposals are checked for participation, independently of a
 new submission succeeding. Headcounts are coverage, not governance approval:
 actual stake-weighted DRep and committee thresholds are checked by the ledger,
@@ -150,10 +152,13 @@ pre-broadcast journal are reclaimable after two immutable epochs.
 that immutable approval is followed by a terminal action in a later epoch,
 the recipient must have received exactly the requested amount. A terminal
 action without observed ratification may have expired or never been included.
-The guided recipient remains reserved after payout and is checked throughout
-the run, including for delayed double payments.
+Expiry coverage requires an earlier immutable inclusion witness and its ledger
+`expiresAfter` epoch, followed by immutable disappearance beyond that epoch and
+an unchanged recipient balance. Never-included submissions do not count.
+The payout recipient and successfully expired receiver 2 remain reserved and
+are checked throughout the run for delayed or duplicate payments.
 
-The majority, guided-YES, ratification and payout Sometimes properties are
+The majority, guided-YES, ratification, payout and expiry Sometimes properties are
 emitted false before their success paths, so an unexercised phase stays visible
 and fails coverage. The treasury workload applies to both Conway and Dijkstra;
 it does not change the Leios-only gates of the load and EB probes.
@@ -165,8 +170,9 @@ it does not change the Leios-only gates of the load and EB probes.
 | `treasury_withdrawal_slot_reclaimed_after_abandonment` | Sometimes | a funds-receiving claim outlived a create-driver process that died mid-submit, and was self-healed |
 | `treasury_withdrawal_ratified` | Sometimes | the ledger reports a tracked treasury action ratified at the immutable tip |
 | `treasury_withdrawal_enacted_correctly` | Sometimes | an immutable, terminal withdrawal's recipient balance increased by exactly the transferred amount |
-| `treasury_withdrawal_resolved_without_payout` | Sometimes | a withdrawal left the live set (rejected/expired) without a payout landing |
+| `treasury_withdrawal_resolved_without_payout` | Sometimes | a withdrawal previously observed at the immutable tip expired and left both live and immutable sets with zero recipient balance delta |
 | `treasury_withdrawal_no_overpay` | **Always** | a pending or retained guided claim's immutable balance delta is between zero and its transfer amount |
+| `treasury_withdrawal_expired_no_payout` | **Always** | the isolated unvoted receiver remains unpaid after witnessed expiry, including on later checks |
 | `treasury_withdrawal_payout_matches_ratification` | **Always** | a terminal action with immutable ratification evidence paid exactly its transfer amount in a later epoch |
 
 ## `parallel_driver_create_pparam_update.py` — submit one ParameterChange action
