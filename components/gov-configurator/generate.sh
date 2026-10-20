@@ -230,6 +230,13 @@ for ((i = 1; i <= NUM_POOLS; i++)); do
     mkdir -p "/gov-data/pools/node-pool${i}"
     cp "${STATE}/nodes/node-pool${i}/cold.vkey" "/gov-data/pools/node-pool${i}/"
     cp "${STATE}/nodes/node-pool${i}/cold.skey" "/gov-data/pools/node-pool${i}/"
+    # The node's BLS signing key must also be registered with its proof of
+    # possession in the ledger. first_setup does that before fault injection.
+    if [ "$PROTOCOL_VERSION" -ge 12 ]; then
+        for file in bls.skey bls.vkey vrf.vkey reward.vkey owner-stake.vkey owner-stake.skey; do
+            cp "${STATE}/nodes/node-pool${i}/${file}" "/gov-data/pools/node-pool${i}/"
+        done
+    fi
 done
 
 # clusterlib (python drivers) reads network params from shelley genesis.

@@ -49,6 +49,19 @@ re-runs without it.
 | `payment_pool_funded` | Sometimes | the shared payment-address pool got funded |
 | `payment_pool_funding_failed` | Unreachable | funding the payment pool failed |
 | `governance_setup_complete` | Sometimes | setup finished end to end |
+| `leios_pool_keys_submitted` | Sometimes, Leios only | all generated producer BLS keys are active, pending, or submitted with proof of possession |
+| `leios_pool_keys_active` | Sometimes, Leios only | every producer's active ledger voting key matches its staged BLS verification key after the setup epoch wait |
+| `leios_pool_keys_setup_failed` | Unreachable, Leios only | voting-key registration or confirmation failed; setup returns 1 without enabling faults |
+
+Leios bootstrap registers the BLS keys the producers already start with. Genesis
+pools initially have no ledger voting key. The configurator stages the matching
+VRF, reward and owner keys; setup submits a single pool-update transaction with
+the BLS proofs, cold-key and owner witnesses. It preserves pledge, cost, margin,
+VRF and reward account, and makes the generated owner stake key the pool owner
+(the genesis pools initially have no owners). Existing active or pending matching
+keys are not resubmitted. The normal setup epoch wait activates the updates;
+the Leios committee picks them up through its subsequent stake snapshot. This
+is baseline initialization, separate from the isolated payment workload.
 
 ## `parallel_driver_create_action.py` — submit one InfoAction
 

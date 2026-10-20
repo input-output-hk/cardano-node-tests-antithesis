@@ -77,6 +77,11 @@ samples; it does not assert sustained TPS, a recovery deadline or EB
 certification. Both `leios` and `leios-latest` enable it through their
 v12 genesis. Conway emits no SDK properties from this probe.
 
+Leios setup also registers the producers' generated BLS keys with their proofs
+of possession. Key files alone do not give a pool a voting key in the ledger.
+This happens before fault injection, separately from the payment workload;
+Conway does not stage or register these assets.
+
 Only `TX_FIREHOSE` is wired as a passthrough; the rest are read from the
 environment by `/entrypoint.sh` but not listed in the service, so
 changing one means editing the `tx-firehose` service's `environment:`
