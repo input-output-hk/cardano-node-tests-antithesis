@@ -77,6 +77,14 @@ samples; it does not assert sustained TPS, a recovery deadline or EB
 certification. Both `leios` and `leios-latest` enable it through their
 v12 genesis. Conway emits no SDK properties from this probe.
 
+The isolated Leios payment drivers go further: they follow a specific signed
+transaction through an EB and its certifying ranking block to an immutable
+payment output. They use private payment credentials and funds, without changing
+governance state or pool configuration. The Leios workflow enables an additional
+human trace stream because the pinned node omits EB transaction references from
+its machine format. See `PROPERTIES.md` for the evidence required and fault
+handling; an ordinary-block payment does not count as certified-EB coverage.
+
 Leios setup also registers the producers' generated BLS keys with their proofs
 of possession. Key files alone do not give a pool a voting key in the ledger.
 This happens before fault injection, separately from the payment workload;

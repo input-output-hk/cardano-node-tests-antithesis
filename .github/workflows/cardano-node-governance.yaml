@@ -177,6 +177,7 @@ jobs:
           -e 's|\${PROTOCOL_VERSION:-10}|${PROTOCOL_VERSION:-12}|' \
           -e 's|\${GOV_COMMAND_ERA:-conway}|${GOV_COMMAND_ERA:-dijkstra}|' \
           -e 's|\${NODE_EXTRA_ARGS:-}|${NODE_EXTRA_ARGS:---shelley-bls-key /configs/keys/bls.skey}|' \
+          -e 's|./tracer-config.yaml:|./tracer-config-leios.yaml:|' \
           "$COMPOSE"
 
         git config user.name "github-actions[bot]"

@@ -8,8 +8,8 @@ Antithesis groups these the same way in a report's **Properties** panel:
 
 - **Always** — must hold every time it's checked. A single failure is a
   real bug.
-- **Sometimes** — must happen at least once across the whole run. Never
-  firing is a coverage gap, not a failure.
+- **Sometimes** — must be true at least once across the whole run. Never
+  being true is a coverage failure; individual false samples are expected under faults.
 - **Reachable** / **Unreachable** — the driver got here at least once /
   must never get here. An `unreachable` id firing IS a failure.
 
@@ -403,6 +403,56 @@ empty EBs, warnings and vote-scheduling events cannot satisfy it.
 Matching hashes across a fork is still coverage, not evidence of
 canonical-chain inclusion or successful certification. No shared cursor
 or persistent observation state is needed between driver invocations.
+
+## Isolated certified-EB payments — `parallel_driver_leios_transactions.py` / `anytime_leios_transactions.py`
+
+Enabled only by the v12 genesis used by `leios` and `leios-latest`; both drivers
+emit no SDK properties in Conway, including their wrapper scaffolding. The
+Leios workflow selects `tracer-config-leios.yaml`, preserving machine logs and
+adding human logs under `/tracer/eb-human`. The pinned node exposes EB
+transaction references only in the human format.
+
+The workload owns `/gov-data/leios_transactions`, a dedicated payment source
+and recipient, and an `fcntl` lock shared only by its creator and observer.
+The source receives a one-time faucet transfer under the existing faucet lock;
+subsequent fan-outs and payments use only those private funds. It neither uses
+governance payment addresses nor changes pools, committee membership or protocol
+parameters. The recipient's outputs are never spent.
+
+Payments are built in batches of up to 16, with about 13 KiB of metadata each,
+so a burst can exceed a ranking block's capacity. At most 64 payment records are
+pending. Every signed payment is journaled before the first broadcast; uncertain
+submissions are retried while valid. Unproven records are retired only after
+their validity bound (at most 1500 slots, or one epoch if shorter) is immutable,
+allowing fresh attempts without an unbounded journal. After the first complete
+witness, submission stops and the retained outputs continue to be checked.
+
+EB references hash the whole signed transaction, not its transaction id. The
+observer reconstructs the complete ordered EB body's CBOR and hashes it,
+linking membership to the exact EB hash without guessing from timestamps.
+It requires `LeiosCertifiedAndAnnounced`, which carries the actual constructed
+header hash with its certificate flag set, rather than the pre-forge
+`BlockCertified` trace. The hash-bound announcement in that block's immediate
+parent identifies the certified EB. This deliberately witnesses certifying RBs
+that also announce a new EB, a subset of all certifications. A hash-linked path
+of forged block headers must connect that ranking block to the immutable tip. Missing headers,
+orphaned certificates, ordinary-block payments and partial traces cannot satisfy
+coverage. UTxOs are queried between two matching immutable tip hashes.
+
+Reads are incremental and bounded to 8 MiB per file per invocation; partial
+records are retried after append. Up to 20,000 block headers are retained.
+Rotated or missing evidence can delay coverage, never establish inclusion.
+The checks impose no transaction latency or recovery deadline during faults.
+
+| Assertion | Type | Meaning |
+|---|---|---|
+| `leios_transactions entered` | Reachable | isolated payment driver ran |
+| `leios_tx_tracking entered` | Reachable | certified-EB observer ran |
+| `leios_tx_certified_and_immutable` | Sometimes | a tracked payment belongs to an EB certified by an immutable ranking block, has the expected serialized size, and has the exact expected immutable output; emitted false before evidence is available |
+| `leios_eb_tx_size_matches` | Always | the EB's size for a tracked signed transaction matches its serialized byte length |
+| `leios_certified_tx_payment_matches` | Always | after immutable certification is proven, the unspent output exists at the private recipient with exactly the expected lovelace and no additional assets |
+| `leios_tx_submission_unavailable` | Sometimes, optional | a retryable build/query/submit failure interrupted this invocation |
+| `leios_tx_query_unavailable` | Sometimes, optional | the immutable query failed or could not acquire a consistent point; no payment invariant is evaluated |
 
 ## `eventually_votes_recorded.py` — post-fault recovery check
 

@@ -1,0 +1,17 @@
+networkMagic: 42
+network:
+  tag: AcceptAt
+  contents: "/opt/cardano-tracer/tracer.socket"
+logging:
+- logRoot: "/opt/cardano-tracer/logs"
+  logMode: FileMode
+  logFormat: ForMachine
+# The pinned node exposes EB transaction references only in its human trace.
+# Keep the existing JSON stream for the sidecar and propagation witnesses.
+- logRoot: "/opt/cardano-tracer/eb-human"
+  logMode: FileMode
+  logFormat: ForHuman
+verbosity: Minimum
+hasPrometheus:
+  epHost: 0.0.0.0
+  epPort: 4000
