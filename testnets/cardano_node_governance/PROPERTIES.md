@@ -59,7 +59,16 @@ re-runs without it.
 | `info_action_created` | Sometimes (True and False variants) | coverage of both submit outcomes |
 | `gov_op_under_perturbation` (`op: create`) | Sometimes | an InfoAction landed while the chain was recently stalled |
 
-## `parallel_driver_vote.py` — cast one DRep/SPO/CC vote
+## `parallel_driver_vote.py` — batch missing DRep/SPO/CC votes
+
+Missing credentials are batched onto one expiring InfoAction, with an
+independent random YES/NO/ABSTAIN decision per voter. Completed actions yield
+to the next incomplete action; replacements continue once all are complete.
+A workload-local nonblocking lock prevents overlapping batches. Participation
+is observed before submission as well as after, so a failed submit cannot hide
+an already reached threshold. The majority is a count of recorded votes of any
+decision, not a stake-weighted approval threshold. Coverage is seeded false
+once setup completes.
 
 | Assertion | Type | Meaning |
 |---|---|---|
@@ -68,11 +77,11 @@ re-runs without it.
 | `actions_live` | Sometimes | ≥1 votable action existed in gov-state |
 | `vote_transient_failure` | Sometimes | a vote submit failed transiently (retried next tick) |
 | `vote_submitted` | Reachable | a vote was actually submitted |
-| `vote_recorded_<kind>` | Sometimes | that voter kind's (drep/spo/cc) vote was recorded |
+| `vote_recorded_<kind>` | Sometimes | the submitted credential's exact decision was recorded for that voter kind |
 | `vote_decision_<yes\|no\|abstain>` | Sometimes | that decision was cast at least once |
 | `vote_decision_<decision>_by_<kind>` | Sometimes | that decision/voter-kind combination occurred |
 | `action_voted_by_all_roles` | Sometimes | a single action got votes from all 3 roles |
-| `action_majority_reached` | Sometimes | a single action's votes crossed the majority threshold |
+| `action_majority_reached` | Sometimes | a single action has at least ceil((NUM_DREPS + NUM_POOLS + NUM_CC)/2) recorded votes of any decision |
 | `gov_op_under_perturbation` (`op: vote`) | Sometimes | a vote landed while the chain was recently stalled |
 
 ## `parallel_driver_create_treasury_withdrawal.py` — submit one TreasuryWithdrawals action
