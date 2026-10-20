@@ -6,6 +6,9 @@ Antithesis fault-injection testnets for cardano-node. `README.md` and
 
 ## Drivers (`components/gov-cli/composer/governance-python/`)
 
+- Keep workloads as isolated as possible: own funds and credentials, minimal shared state,
+  and no dependency on another workload's execution order. Global parameter changes need a
+  dedicated scenario rather than being mixed into independent workloads.
 - Filename prefixes are load-bearing. `first_`, `parallel_driver_`, `anytime_`, `eventually_`,
   `finally_` are scheduled; `helper_` is ignored. A wrong prefix drops the entire workload.
 - End every driver with `sdk.run_driver(...)`. Never hand-roll try/except/exit.
