@@ -68,7 +68,9 @@ def observe(cluster: clusterlib.ClusterLib, idx: int, record: dict, live: dict) 
         and "ratified_epoch" not in record
     )
     if expired:
-        sdk.sometimes(delta == 0, "treasury_withdrawal_resolved_without_payout", details)
+        sdk.sometimes(
+            delta == 0, "treasury_withdrawal_resolved_without_payout", details, must_hit=False
+        )
         if idx == treasury.EXPIRY_RECEIVER:
             sdk.always(delta == 0, "treasury_withdrawal_expired_no_payout", details)
             # Keep the isolated receiver to detect a delayed erroneous payment.
@@ -87,7 +89,9 @@ def main() -> int:
     # Register even if no proposal ever reaches the corresponding phase.
     sdk.sometimes(False, "treasury_withdrawal_ratified")
     sdk.sometimes(False, "treasury_withdrawal_enacted_correctly")
-    sdk.sometimes(False, "treasury_withdrawal_resolved_without_payout")
+    # Natural expiry can outlive the production three-hour budget. Keep the
+    # observation visible without requiring an impossible coverage hit.
+    sdk.sometimes(False, "treasury_withdrawal_resolved_without_payout", must_hit=False)
     cluster = g.make_cluster()
     with treasury.lock() as locked:
         if not locked:

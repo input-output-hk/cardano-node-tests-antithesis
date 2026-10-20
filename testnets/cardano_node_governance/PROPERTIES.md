@@ -158,7 +158,14 @@ an unchanged recipient balance. Never-included submissions do not count.
 The payout recipient and successfully expired receiver 2 remain reserved and
 are checked throughout the run for delayed or duplicate payments.
 
-The majority, guided-YES, ratification, payout and expiry Sometimes properties are
+Expiry is observational (`must_hit=False`): at production k=150 each epoch
+lasts 50 minutes, and a proposal created after setup may remain live until
+epoch 5, beyond the three-hour moog budget. It stays visible when unexercised;
+immutable expiry evidence and the Always zero-payout check are still required
+whenever the outcome occurs. The isolated expiry lane does not shorten the
+shared governance lifetime or change production timing.
+
+The majority, guided-YES, ratification and payout Sometimes properties are
 emitted false before their success paths, so an unexercised phase stays visible
 and fails coverage. The treasury workload applies to both Conway and Dijkstra;
 it does not change the Leios-only gates of the load and EB probes.
@@ -170,7 +177,7 @@ it does not change the Leios-only gates of the load and EB probes.
 | `treasury_withdrawal_slot_reclaimed_after_abandonment` | Sometimes | a funds-receiving claim outlived a create-driver process that died mid-submit, and was self-healed |
 | `treasury_withdrawal_ratified` | Sometimes | the ledger reports a tracked treasury action ratified at the immutable tip |
 | `treasury_withdrawal_enacted_correctly` | Sometimes | an immutable, terminal withdrawal's recipient balance increased by exactly the transferred amount |
-| `treasury_withdrawal_resolved_without_payout` | Sometimes | a withdrawal previously observed at the immutable tip expired and left both live and immutable sets with zero recipient balance delta |
+| `treasury_withdrawal_resolved_without_payout` | Sometimes (`must_hit=False`) | a withdrawal previously observed at the immutable tip expired and left both live and immutable sets with zero recipient balance delta |
 | `treasury_withdrawal_no_overpay` | **Always** | a pending or retained guided claim's immutable balance delta is between zero and its transfer amount |
 | `treasury_withdrawal_expired_no_payout` | **Always** | the isolated unvoted receiver remains unpaid after witnessed expiry, including on later checks |
 | `treasury_withdrawal_payout_matches_ratification` | **Always** | a terminal action with immutable ratification evidence paid exactly its transfer amount in a later epoch |

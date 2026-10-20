@@ -148,7 +148,7 @@ class TreasuryFaultPaths(unittest.TestCase):
             ):
                 checker.observe(self.cluster, treasury.EXPIRY_RECEIVER, self.record, state())
         self.sdk.sometimes.assert_any_call(
-            True, "treasury_withdrawal_resolved_without_payout", mock.ANY
+            True, "treasury_withdrawal_resolved_without_payout", mock.ANY, must_hit=False
         )
         self.sdk.always.assert_any_call(False, "treasury_withdrawal_expired_no_payout", mock.ANY)
         self.journal["release_recv_slot"].assert_not_called()
@@ -181,6 +181,9 @@ class TreasuryFaultPaths(unittest.TestCase):
         self.journal["release_recv_slot"].assert_not_called()
         self.sdk.sometimes.assert_any_call(False, "treasury_withdrawal_ratified")
         self.sdk.sometimes.assert_any_call(False, "treasury_withdrawal_enacted_correctly")
+        self.sdk.sometimes.assert_any_call(
+            False, "treasury_withdrawal_resolved_without_payout", must_hit=False
+        )
 
     def test_advancing_immutable_point_is_not_a_snapshot(self) -> None:
         def query(_cluster: object, args: list, **_kwargs: object) -> object:
