@@ -21,10 +21,9 @@ EXPIRY_RECEIVER = 2
 
 
 @contextlib.contextmanager
-def lock() -> cabc.Iterator[bool]:
-    """Serialize treasury creators, voters and observers without waiting."""
+def _lock(name: str) -> cabc.Iterator[bool]:
     g.ensure_dirs()
-    with (g.STATE_DIR / "treasury.lock").open("a") as fh:
+    with (g.STATE_DIR / name).open("a") as fh:
         try:
             fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
@@ -34,6 +33,21 @@ def lock() -> cabc.Iterator[bool]:
             yield True
         finally:
             fcntl.flock(fh, fcntl.LOCK_UN)
+
+
+def lock() -> contextlib.AbstractContextManager[bool]:
+    """Serialize observers only; a stalled submit must not block observation."""
+    return _lock("treasury-observer.lock")
+
+
+def submission_lock() -> contextlib.AbstractContextManager[bool]:
+    """Serialize creators and voters, independently of the observer."""
+    return _lock("treasury-submit.lock")
+
+
+def receiver_lock(idx: int) -> contextlib.AbstractContextManager[bool]:
+    """Protect one claim's preparation, mutation and release."""
+    return _lock(f"treasury-receiver-{idx}.lock")
 
 
 def query(cluster: clusterlib.ClusterLib, args: list[str], *, immutable: bool = False) -> object:

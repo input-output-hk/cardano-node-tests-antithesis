@@ -167,7 +167,7 @@ def main() -> int:
         return 0
     try:
         cluster = g.make_cluster()
-        with treasury.lock() as locked:
+        with treasury.submission_lock() as locked:
             if not locked:
                 return 0
             try:

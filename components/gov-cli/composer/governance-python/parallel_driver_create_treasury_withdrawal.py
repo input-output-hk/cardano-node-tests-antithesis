@@ -34,6 +34,7 @@ receiver 2 is left unvoted for expiry, and remaining receivers retain random vot
 
 from __future__ import annotations
 
+import contextlib
 import sys
 
 import helper_gov as g
@@ -45,7 +46,9 @@ MIN_TRANSFER = 1_000_000  # 1 ADA
 MAX_TRANSFER = 5_000_000  # 5 ADA
 
 
-def _claim_recv_slot(cluster: clusterlib.ClusterLib) -> tuple[int | None, str | None]:
+def _claim_recv_slot(
+    cluster: clusterlib.ClusterLib, preparing: contextlib.ExitStack
+) -> tuple[int | None, str | None]:
     """Try the guided receiver first, then a randomly rotated remainder.
 
     Atomically claim the first free funds-receiving slot. Returns
@@ -58,23 +61,33 @@ def _claim_recv_slot(cluster: clusterlib.ClusterLib) -> tuple[int | None, str | 
         order = order[start:] + order[:start]
     order = [treasury.GUIDED_RECEIVER, treasury.EXPIRY_RECEIVER, *order]
     order = [i for i in order if i <= g.NUM_DREPS]
-    claimed = {idx for idx, _record in g.pending_recv_slots()}
     for i in order:
-        if i in claimed:
-            continue
-        addr_file = g.TREASURY_RECV_DIR / f"treasury_recv{i}_stake.addr"
-        if not addr_file.exists():
-            continue
-        addr = addr_file.read_text().strip()
-        _tip, _state, pre_balance = treasury.immutable_snapshot(cluster, addr)
-        if g.claim_recv_slot(i, pre_balance=pre_balance, claimed_epoch=epoch):
-            return i, addr
+        with contextlib.ExitStack() as candidate:
+            if not candidate.enter_context(treasury.receiver_lock(i)):
+                continue
+            if i in dict(g.pending_recv_slots()):
+                continue
+            addr_file = g.TREASURY_RECV_DIR / f"treasury_recv{i}_stake.addr"
+            if not addr_file.exists():
+                continue
+            addr = addr_file.read_text().strip()
+            _tip, _state, pre_balance = treasury.immutable_snapshot(cluster, addr)
+            if g.claim_recv_slot(i, pre_balance=pre_balance, claimed_epoch=epoch):
+                preparing.enter_context(candidate.pop_all())
+                return i, addr
     return None, None
 
 
 def create(cluster: clusterlib.ClusterLib, addr: clusterlib.AddressRecord) -> int:
+    with contextlib.ExitStack() as preparing:
+        return _create(cluster, addr, preparing)
+
+
+def _create(
+    cluster: clusterlib.ClusterLib, addr: clusterlib.AddressRecord, preparing: contextlib.ExitStack
+) -> int:
     try:
-        recv_idx, recv_addr = _claim_recv_slot(cluster)
+        recv_idx, recv_addr = _claim_recv_slot(cluster, preparing)
     except Exception as exc:  # noqa: BLE001
         print(f"treasury recipient snapshot unavailable: {exc}", file=sys.stderr)
         sdk.sometimes(True, "treasury_withdrawal_query_unavailable")
@@ -89,6 +102,9 @@ def create(cluster: clusterlib.ClusterLib, addr: clusterlib.AddressRecord) -> in
         nonlocal broadcast_intent
         g.complete_recv_slot(recv_idx, txid=txid, ix=0)
         broadcast_intent = True
+        # The complete immutable claim is now observable, even if broadcasting
+        # or confirmation blocks. TTL prevents inclusion after reclamation.
+        preparing.close()
 
     try:
         tok = g.unique_token()
@@ -157,7 +173,7 @@ def main() -> int:
         if not g.wait_for_node(cluster, tries=30):
             sdk.unreachable("create_treasury_withdrawal_node_not_ready")
             return 0
-        with treasury.lock() as locked:
+        with treasury.submission_lock() as locked:
             if not locked:
                 return 0
             return create(cluster, addr)

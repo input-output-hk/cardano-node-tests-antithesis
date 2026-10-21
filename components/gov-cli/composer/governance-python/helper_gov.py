@@ -244,7 +244,7 @@ def claim_recv_slot(idx: int, pre_balance: int, claimed_epoch: int) -> bool:
 
 
 def complete_recv_slot(idx: int, **fields: tp.Any) -> None:
-    """Atomically update a recipient claim while holding helper_treasury.lock.
+    """Atomically update a claim while holding helper_treasury.receiver_lock(idx).
 
     In particular, persist txid/ix before broadcasting a signed transaction.
     """

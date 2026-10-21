@@ -104,12 +104,19 @@ def main() -> int:
             return 0
         for prop in treasury.actions(live):
             treasury.participation(prop)
-        for idx, record in g.pending_recv_slots():
-            try:
-                observe(cluster, idx, record, live)
-            except Exception as exc:  # noqa: BLE001
-                print(f"treasury claim {idx} snapshot unavailable: {exc}", file=sys.stderr)
-                sdk.sometimes(True, "treasury_withdrawal_query_unavailable")
+        for idx, _record in g.pending_recv_slots():
+            with treasury.receiver_lock(idx) as receiver_locked:
+                if not receiver_locked:
+                    continue
+                # A creator may have replaced a claim since the first scan.
+                record = dict(g.pending_recv_slots()).get(idx)
+                if record is None:
+                    continue
+                try:
+                    observe(cluster, idx, record, live)
+                except Exception as exc:  # noqa: BLE001
+                    print(f"treasury claim {idx} snapshot unavailable: {exc}", file=sys.stderr)
+                    sdk.sometimes(True, "treasury_withdrawal_query_unavailable")
     return 0
 
 

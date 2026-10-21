@@ -94,10 +94,19 @@ can't meaningfully drain the treasury even with many enactments.
 
 Receiver 1 is reserved for guided payout, and receiver 2 for an unvoted
 proposal that expires. Both are prioritised before the remaining random
-receivers. All treasury drivers share a nonblocking `fcntl` lock. The creator
+receivers. Creators and voters share a nonblocking submission lock; the
+observer has its own lock and continues during blocked submissions. Each
+receiver has a separate nonblocking lock for preparing and updating its claim.
+The creator
 journals the signed transaction's id before broadcasting and bounds its
 validity to one epoch, so an interrupted submission remains attributable and
-cannot arrive after its claim is reclaimed. Journal updates are atomic.
+cannot arrive after its claim is reclaimed. It releases the receiver lock after
+journalling, before broadcasting or waiting for confirmation. Before that
+point, only the receiver being prepared is excluded from observation. A killed
+creator releases its kernel lock, allowing stale-claim reclamation.
+Journal updates are atomic; the observer rereads each claim under its receiver
+lock before applying observations, so a reused receiver cannot inherit stale
+attribution.
 
 | Assertion | Type | Meaning |
 |---|---|---|
