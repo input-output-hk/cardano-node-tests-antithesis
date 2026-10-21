@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""parallel_driver_vote_pparam_update.py — cast one DRep/CC vote on one
+"""parallel_driver_vote_pparam_update.py — batch missing DRep/CC votes on one
 live ParameterChange action.
 
 Same shape as parallel_driver_vote_treasury_withdrawal.py, restricted to
@@ -23,6 +23,7 @@ action disappears from live gov-state).
 
 from __future__ import annotations
 
+import fcntl
 import sys
 
 import helper_gov as g
@@ -51,118 +52,154 @@ def build_voters(cluster: clusterlib.ClusterLib) -> list[g.Voter]:
     return voters
 
 
-def main() -> int:
-    sdk.reachable("vote_pparam_update entered")
-    g.ensure_dirs()
+def voter_hash(cluster: clusterlib.ClusterLib, voter: g.Voter) -> str:
+    if voter[0] == "drep":
+        return cluster.g_governance.drep.get_id(drep_vkey_file=voter[3], out_format="hex")
+    return cluster.g_governance.committee.get_key_hash(vkey_file=voter[3])
 
-    if not g.SETUP_MARKER.exists():
-        return 0
 
-    idx = g.rng_mod(g.NUM_PAYMENT_ADDRS)
-    addr, lock_fh = g.try_acquire_payment_addr(idx)
-    if addr is None:
-        return 0  # in use, antithesis retries next tick
+def recorded_vote(prop: dict, kind: str, key: str) -> str | None:
+    field = "dRepVotes" if kind == "drep" else "committeeVotes"
+    return next((v for k, v in prop[field].items() if k.removeprefix("keyHash-") == key), None)
 
+
+def participation(prop: dict) -> None:
+    drep_n, _spo_n, cc_n = g.vote_counts(prop)
+    total = drep_n + cc_n
+    target = (g.NUM_DREPS + g.NUM_CC + 1) // 2
+    sdk.sometimes(
+        drep_n >= 1 and cc_n >= 1,
+        "pparam_update_voted_by_drep_and_cc",
+        {"drep": drep_n, "cc": cc_n},
+    )
+    sdk.sometimes(
+        total >= target,
+        "pparam_update_majority_reached",
+        {"txid": prop["actionId"]["txId"], "total": total, "majority": target},
+    )
+
+
+def cast(cluster: clusterlib.ClusterLib, addr: clusterlib.AddressRecord) -> int:
     try:
-        cluster = g.make_cluster()
-        if not g.wait_for_node(cluster, tries=30):
-            sdk.unreachable("vote_pparam_update_node_not_ready")
-            return 0
-
-        # Pull the live ParameterChange set from gov-state and RNG-select one.
-        props = g.live_pparam_update_actions(cluster)
-        sdk.sometimes(len(props) >= 1, "pparam_update_actions_live", {"live": len(props)})
-        if not props:
-            print("no live pparam update actions in gov-state", file=sys.stderr)
-            return 0
-
-        pick = props[g.rng_mod(len(props))]
-        txid = pick["actionId"]["txId"]
-        ix = pick["actionId"]["govActionIx"]
-
-        voters = build_voters(cluster)
-        if not voters:
-            return 0
-
-        kind, create_fn, vkey_kw, vkey_file, skey_file = voters[g.rng_mod(len(voters))]
-
-        decisions = [
-            (clusterlib.Votes.YES, "yes"),
-            (clusterlib.Votes.NO, "no"),
-            (clusterlib.Votes.ABSTAIN, "abstain"),
+        state = cluster.g_query.get_gov_state()
+        props = [
+            p
+            for p in state["proposals"]
+            if p["proposalProcedure"]["govAction"]["tag"] == "ParameterChange"
         ]
-        vote_enum, decision = decisions[g.rng_mod(3)]
-
-        tok = g.unique_token()
-        print(f"voting {decision} as {kind} on pparam update {txid}#{ix}", file=sys.stderr)
-
+        # Observe existing votes even when this tick cannot submit another tx.
+        for prop in props:
+            participation(prop)
+        epoch = g.current_epoch(cluster)
+    except Exception as exc:  # noqa: BLE001
+        print(f"pparam vote query unavailable: {exc} (will retry)", file=sys.stderr)
+        sdk.sometimes(True, "pparam_update_vote_query_unavailable")
+        return 0
+    # Expired actions can remain listed until the next ledger cleanup epoch.
+    props = [p for p in props if p["expiresAfter"] >= epoch]
+    sdk.sometimes(bool(props), "pparam_update_actions_live", {"live": len(props)})
+    if not props:
+        return 0
+    props.sort(
+        key=lambda p: (p["expiresAfter"], p["actionId"]["txId"], p["actionId"]["govActionIx"])
+    )
+    keyed = [(v, voter_hash(cluster, v)) for v in build_voters(cluster)]
+    if not keyed:
+        return 0
+    selected = []
+    for pick in props:
+        selected = [(v, key) for v, key in keyed if recorded_vote(pick, v[0], key) is None]
+        if selected:
+            break
+    if not selected:
+        pick = props[g.rng_mod(min(3, len(props)))]
+        selected = [keyed[g.rng_mod(len(keyed))]]
+    txid, ix = pick["actionId"]["txId"], pick["actionId"]["govActionIx"]
+    choices = [
+        (clusterlib.Votes.YES, "yes"),
+        (clusterlib.Votes.NO, "no"),
+        (clusterlib.Votes.ABSTAIN, "abstain"),
+    ]
+    tok = g.unique_token()
+    files, signing, decisions = [], [], []
+    for n, (voter, key) in enumerate(selected):
+        kind, create_fn, vkey_kw, vkey_file, skey_file = voter
+        vote_enum, decision = choices[g.rng_mod(len(choices))]
         vote = create_fn(
-            vote_name=f"pparam_{kind}_{tok}",
+            vote_name=f"pparam_{kind}_{tok}_{n}",
             action_txid=txid,
             action_ix=ix,
             vote=vote_enum,
             destination_dir=str(g.WORK),
             **{vkey_kw: vkey_file},
         )
-
-        try:
-            g.build_sign_submit(
-                cluster,
-                f"pparam_vote_{tok}",
-                vote_files=[vote.vote_file],
-                signing_key_files=[skey_file],
-                src_addr=addr,
-            )
-        except Exception as exc:  # noqa: BLE001
-            print(
-                f"pparam update vote submit failed transiently for {txid}: {exc} (will retry)",
-                file=sys.stderr,
-            )
-            sdk.sometimes(True, "pparam_update_vote_transient_failure", {"voter": kind})
-            return 0
-        sdk.reachable("pparam_update_vote_submitted")
-
-        drep_n = cc_n = 0
-        try:
-            prop = g.lookup_proposal(cluster.g_query.get_gov_state(), txid) or {}
-            drep_n, _spo_n, cc_n = g.vote_counts(prop)
-        except Exception:  # noqa: BLE001
-            pass
-        total = drep_n + cc_n
-        majority = (g.NUM_DREPS + g.NUM_CC + 1) // 2
-
-        sdk.sometimes(total >= 1, f"pparam_update_vote_recorded_{kind}")
+        files.append(vote.vote_file)
+        signing.append(skey_file)
+        decisions.append((kind, key, decision))
+    try:
+        g.build_sign_submit(
+            cluster,
+            f"pparam_vote_{tok}",
+            vote_files=files,
+            signing_key_files=signing,
+            src_addr=addr,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"pparam vote batch interrupted for {txid}: {exc} (will retry)", file=sys.stderr)
+        sdk.sometimes(True, "pparam_update_vote_transient_failure")
+        return 0
+    sdk.reachable("pparam_update_vote_submitted")
+    prop = None
+    try:
+        props = cluster.g_query.get_gov_state()["proposals"]
+        prop = next((p for p in props if p["actionId"] == {"txId": txid, "govActionIx": ix}), None)
+    except Exception as exc:  # noqa: BLE001
+        print(f"post-vote pparam query unavailable: {exc} (will retry)", file=sys.stderr)
+        sdk.sometimes(True, "pparam_update_vote_query_unavailable")
+    for kind, key, decision in decisions:
         sdk.sometimes(True, f"pparam_update_vote_decision_{decision}")
         sdk.sometimes(
             True,
             f"pparam_update_vote_decision_{decision}_by_{kind}",
             {"voter": kind, "decision": decision},
         )
-
-        all_roles = drep_n >= 1 and cc_n >= 1
-        sdk.sometimes(
-            all_roles,
-            "pparam_update_voted_by_drep_and_cc",
-            {"drep": drep_n, "cc": cc_n},
-        )
-        sdk.sometimes(
-            total >= majority,
-            "pparam_update_majority_reached",
-            {"total": total, "majority": majority},
-        )
-
-        if g.recent_stall(cluster):
+        if prop is not None:
             sdk.sometimes(
-                True, "gov_op_under_perturbation", {"op": "vote_pparam_update", "voter": kind}
+                recorded_vote(prop, kind, key) == f"Vote{decision.capitalize()}",
+                f"pparam_update_vote_recorded_{kind}",
             )
+    if prop is not None:
+        participation(prop)
+    if g.recent_stall(cluster):
+        sdk.sometimes(True, "gov_op_under_perturbation", {"op": "vote_pparam_update"})
+    print(f"submitted {len(selected)} pparam votes on {txid}#{ix}", file=sys.stderr)
+    return 0
 
-        print(
-            f"pparam update vote submitted ({kind} {decision}; action now has {total} votes)",
-            file=sys.stderr,
-        )
+
+def main() -> int:
+    sdk.reachable("vote_pparam_update entered")
+    g.ensure_dirs()
+    if not g.SETUP_MARKER.exists():
         return 0
-    finally:
-        g.release_payment_addr(lock_fh)
+    sdk.sometimes(False, "pparam_update_majority_reached")
+    # Workload-local: neither the creator nor any observer takes this lock.
+    with (g.STATE_DIR / "pparam_votes.lock").open("a") as fh:
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return 0
+        idx = g.rng_mod(g.NUM_PAYMENT_ADDRS)
+        addr, lock_fh = g.try_acquire_payment_addr(idx)
+        if addr is None:
+            return 0
+        try:
+            cluster = g.make_cluster()
+            if not g.wait_for_node(cluster, tries=30):
+                sdk.unreachable("vote_pparam_update_node_not_ready")
+                return 0
+            return cast(cluster, addr)
+        finally:
+            g.release_payment_addr(lock_fh)
 
 
 if __name__ == "__main__":
