@@ -74,22 +74,36 @@ class TreasuryFaultPaths(unittest.TestCase):
         self.observe(immutable=state([proposal()]))
         self.journal["release_recv_slot"].assert_not_called()
         self.sdk.sometimes.assert_not_called()
+        details = self.sdk.always.call_args.args[2]
+        self.assertEqual(details["waiting_reason"], "immutable_proposal_live")
+        self.assertEqual(details["immutable_epoch"], 3)
+        self.assertIsNone(details["ratified_epoch"])
 
     def test_uncertain_submission_waits_until_validity_is_immutable(self) -> None:
         self.tip["slot"] = 99
         self.observe()
         self.journal["release_recv_slot"].assert_not_called()
+        self.assertEqual(
+            self.sdk.always.call_args.args[2]["waiting_reason"],
+            "submission_validity_not_immutable",
+        )
 
     def test_late_volatile_inclusion_preserves_claim(self) -> None:
         self.observe(live=state([proposal()]))
         self.journal["release_recv_slot"].assert_not_called()
+        self.assertEqual(
+            self.sdk.always.call_args.args[2]["waiting_reason"], "volatile_proposal_live"
+        )
 
     def test_ratification_is_ledger_evidence_and_waits_for_next_epoch(self) -> None:
         self.observe(immutable=state(ratified=[proposal()]))
         self.journal["complete_recv_slot"].assert_called_once_with(1, ratified_epoch=3)
-        self.sdk.sometimes.assert_called_once_with(
-            True, "treasury_withdrawal_ratified", {"txid": "action"}
-        )
+        self.sdk.sometimes.assert_called_once_with(True, "treasury_withdrawal_ratified", mock.ANY)
+        details = self.sdk.sometimes.call_args.args[2]
+        self.assertEqual(details["txid"], "action")
+        self.assertEqual(details["immutable_slot"], 150)
+        self.assertEqual(details["ratified_epoch"], 3)
+        self.assertEqual(details["waiting_reason"], "next_immutable_epoch")
         self.journal["release_recv_slot"].assert_not_called()
 
     def test_ratified_action_without_payout_fails_exact_accounting(self) -> None:
@@ -101,6 +115,7 @@ class TreasuryFaultPaths(unittest.TestCase):
                 for c in self.sdk.always.call_args_list
             )
         )
+        self.assertIsNone(self.sdk.always.call_args.args[2]["waiting_reason"])
 
     def test_successful_guided_payout_keeps_recipient_reserved(self) -> None:
         self.record["ratified_epoch"] = 2

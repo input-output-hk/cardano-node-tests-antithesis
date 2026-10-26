@@ -84,9 +84,7 @@ class TreasuryConcurrency(unittest.TestCase):
             assert self.ready.wait(3), "driver did not reach submission"
             for _ in range(3):
                 assert checker.main() == 0
-            self.sdk.sometimes.assert_any_call(
-                True, "treasury_withdrawal_ratified", {"txid": "action"}
-            )
+            self.sdk.sometimes.assert_any_call(True, "treasury_withdrawal_ratified", mock.ANY)
             assert dict(g.pending_recv_slots())[1]["ratified_epoch"] == 2
         finally:
             self.release.set()

@@ -179,6 +179,14 @@ emitted false before their success paths, so an unexercised phase stays visible
 and fails coverage. The treasury workload applies to both Conway and Dijkstra;
 it does not change the Leios-only gates of the load and EB probes.
 
+Treasury snapshot assertions include the receiver and action id, immutable slot
+and epoch, observed ratification epoch, submission validity bound, both proposal
+presence flags, and `waiting_reason`. The reason identifies a proposal still
+live at the immutable or volatile tip, a validity bound not yet immutable, or a
+wait for the next immutable epoch. It is null when terminal accounting is
+eligible. Ratification observations carry the same details. These diagnostics
+do not add queries or change the accounting predicates or coverage requirements.
+
 | Assertion | Type | Meaning |
 |---|---|---|
 | `treasury_withdrawal_enactment entered` | Reachable | checker ran |

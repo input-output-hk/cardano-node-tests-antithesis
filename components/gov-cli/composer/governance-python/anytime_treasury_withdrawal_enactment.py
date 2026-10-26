@@ -31,25 +31,51 @@ def observe(cluster: clusterlib.ClusterLib, idx: int, record: dict, live: dict) 
     tip, state, balance = treasury.immutable_snapshot(cluster, record["recv_addr"])
     delta = balance - record["pre_balance"]
     expected = record["transfer_amt"]
-    details = {"txid": txid, "delta": delta, "expected": expected, "immutable_slot": tip["slot"]}
+    ratified = state["nextRatifyState"]["enactedGovActions"]
+    is_ratified = any(treasury.action_id(p) == (txid, ix) for p in ratified)
+    ratified_epoch = tip["epoch"] if is_ratified else record.get("ratified_epoch")
+    immutable_action = treasury.find_action(state, txid, ix)
+    volatile_action = treasury.find_action(live, txid, ix)
+    if immutable_action:
+        waiting_reason = "immutable_proposal_live"
+    elif volatile_action:
+        waiting_reason = "volatile_proposal_live"
+    elif tip["slot"] < record["valid_until"]:
+        waiting_reason = "submission_validity_not_immutable"
+    elif ratified_epoch is not None and tip["epoch"] <= ratified_epoch:
+        waiting_reason = "next_immutable_epoch"
+    else:
+        waiting_reason = None
+    details = {
+        "txid": txid,
+        "ix": ix,
+        "receiver": idx,
+        "delta": delta,
+        "expected": expected,
+        "immutable_slot": tip["slot"],
+        "immutable_epoch": tip["epoch"],
+        "ratified_epoch": ratified_epoch,
+        "valid_until": record["valid_until"],
+        "immutable_proposal_live": bool(immutable_action),
+        "volatile_proposal_live": bool(volatile_action),
+        "waiting_reason": waiting_reason,
+    }
     sdk.always(0 <= delta <= expected, "treasury_withdrawal_no_overpay", details)
 
-    ratified = state["nextRatifyState"]["enactedGovActions"]
-    if any(treasury.action_id(p) == (txid, ix) for p in ratified):
+    if is_ratified:
         # This is the ledger's stake-weighted DRep + CC decision, not a
         # headcount approximation. Immutable evidence survives rollbacks.
         g.complete_recv_slot(idx, ratified_epoch=tip["epoch"])
         record["ratified_epoch"] = tip["epoch"]
-        sdk.sometimes(True, "treasury_withdrawal_ratified", {"txid": txid})
+        sdk.sometimes(True, "treasury_withdrawal_ratified", details)
 
-    immutable_action = treasury.find_action(state, txid, ix)
     if immutable_action is not None:
         # Persist inclusion evidence; absence alone could be a failed submit.
         expires_after = immutable_action["expiresAfter"]
         if record.get("expires_after") != expires_after:
             g.complete_recv_slot(idx, expires_after=expires_after)
             record["expires_after"] = expires_after
-    if immutable_action or treasury.find_action(live, txid, ix):
+    if immutable_action or volatile_action:
         return
     # An uncertain submission is terminal only once a delayed inclusion is
     # impossible at the immutable tip.
