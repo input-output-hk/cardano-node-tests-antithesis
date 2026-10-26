@@ -327,6 +327,8 @@ def build_sign_submit(
     src_addr: clusterlib.AddressRecord | None = None,
     invalid_hereafter: int | None = None,
     before_submit: cabc.Callable[[str], None] | None = None,
+    treasury_donation: int | None = None,
+    submission_file: pathlib.Path | None = None,
 ) -> str:
     """Build, sign, submit. Returns txid.
 
@@ -335,6 +337,8 @@ def build_sign_submit(
     serialized on the faucet lock.
     before_submit can journal the signed transaction id before any broadcast;
     invalid_hereafter bounds how long an uncertain submission can still land.
+    submission_file retains the exact signed bytes before journalling so setup
+    can safely rebroadcast an interrupted submission, including after a restart.
     """
     fa = src_addr if src_addr is not None else faucet()
     lock_ctx = contextlib.nullcontext() if src_addr is not None else faucet_lock()
@@ -355,6 +359,7 @@ def build_sign_submit(
             witness_override=len(all_signing),
             destination_dir=str(WORK),
             **({"invalid_hereafter": invalid_hereafter} if invalid_hereafter is not None else {}),
+            **({"treasury_donation": treasury_donation} if treasury_donation is not None else {}),
         )
         signed = cluster.g_transaction.sign_tx(
             tx_body_file=out.out_file,
@@ -363,6 +368,10 @@ def build_sign_submit(
             destination_dir=str(WORK),
         )
         txid = cluster.g_transaction.get_txid(tx_body_file=out.out_file)
+        if submission_file is not None:
+            temporary = submission_file.with_suffix(".tmp")
+            temporary.write_bytes(pathlib.Path(signed).read_bytes())
+            temporary.replace(submission_file)
         # Treasury callers journal the exact action id before broadcasting. A
         # process killed during submission must not lose a possibly accepted tx.
         if before_submit is not None:

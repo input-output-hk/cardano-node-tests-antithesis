@@ -35,6 +35,7 @@ receiver 2 is left unvoted for expiry, and remaining receivers retain random vot
 from __future__ import annotations
 
 import contextlib
+import pathlib
 import sys
 
 import helper_gov as g
@@ -78,13 +79,22 @@ def _claim_recv_slot(
     return None, None
 
 
-def create(cluster: clusterlib.ClusterLib, addr: clusterlib.AddressRecord) -> int:
+def create(
+    cluster: clusterlib.ClusterLib,
+    addr: clusterlib.AddressRecord,
+    *,
+    submission_file: pathlib.Path | None = None,
+) -> int:
     with contextlib.ExitStack() as preparing:
-        return _create(cluster, addr, preparing)
+        return _create(cluster, addr, preparing, submission_file=submission_file)
 
 
 def _create(
-    cluster: clusterlib.ClusterLib, addr: clusterlib.AddressRecord, preparing: contextlib.ExitStack
+    cluster: clusterlib.ClusterLib,
+    addr: clusterlib.AddressRecord,
+    preparing: contextlib.ExitStack,
+    *,
+    submission_file: pathlib.Path | None = None,
 ) -> int:
     try:
         recv_idx, recv_addr = _claim_recv_slot(cluster, preparing)
@@ -138,6 +148,7 @@ def _create(
                 src_addr=addr,
                 invalid_hereafter=valid_until,
                 before_submit=journal,
+                **({"submission_file": submission_file} if submission_file is not None else {}),
             )
         except Exception as exc:  # noqa: BLE001
             print(

@@ -33,9 +33,13 @@ from __future__ import annotations
 
 import contextlib
 import sys
+import time
 
 import helper_gov as g
 import helper_sdk as sdk
+import helper_treasury as treasury
+import parallel_driver_create_treasury_withdrawal as treasury_creator
+import parallel_driver_vote_treasury_withdrawal as treasury_voter
 from cardano_clusterlib import clusterlib
 
 DREP_DELEGATED = 500_000_000_000
@@ -190,6 +194,88 @@ def _setup_treasury_recv_pool(cluster: clusterlib.ClusterLib) -> None:
     print(f"treasury-recv pool registered ({g.NUM_DREPS} addresses)", file=sys.stderr)
 
 
+def _prepare_treasury_payout(cluster: clusterlib.ClusterLib) -> bool:
+    """Seed the isolated payout lane before the delegation epoch wait.
+
+    Genesis starts with an empty treasury; waiting for natural rewards adds
+    another epoch before ratification is possible. Fund it with an explicit
+    donation and prepare the proposal before the delegation epoch wait.
+    Submission remains fault-tested by the parallel lanes; this lane starts
+    with confirmed votes so faults can exercise ratification and settlement.
+    """
+    sdk.sometimes(False, "treasury_withdrawal_setup_ready")
+    try:
+        name = "guided_payment"
+        address_file = g.TREASURY_RECV_DIR / f"{name}.addr"
+        if not address_file.exists():
+            keys = cluster.g_address.gen_payment_key_pair(
+                key_name=name, destination_dir=str(g.TREASURY_RECV_DIR)
+            )
+            address = cluster.g_address.gen_payment_addr(
+                addr_name=name,
+                payment_vkey_file=keys.vkey_file,
+                destination_dir=str(g.TREASURY_RECV_DIR),
+            )
+            address_file.write_text(address + "\n")
+        source = clusterlib.AddressRecord(
+            address=address_file.read_text().strip(),
+            vkey_file=g.TREASURY_RECV_DIR / f"{name}.vkey",
+            skey_file=g.TREASURY_RECV_DIR / f"{name}.skey",
+        )
+        if not cluster.g_query.get_utxo(address=source.address):
+            g.build_sign_submit(
+                cluster,
+                "fund_guided_treasury",
+                txouts=[clusterlib.TxOut(address=source.address, amount=g.PAYMENT_ADDR_FUND)],
+                treasury_donation=treasury_creator.MAX_TRANSFER * g.NUM_DREPS,
+            )
+        # Keep the exact signed proposal for retries, including a setup restart.
+        submission_file = g.TREASURY_RECV_DIR / "guided_proposal.signed"
+        # The new recipient must reach the immutable tip before its baseline
+        # can be taken. Retry transient snapshots and uncertain submissions.
+        for _ in range(120):
+            try:
+                if treasury.guided_id() is None:
+                    treasury_creator.create(cluster, source, submission_file=submission_file)
+                action_id = treasury.guided_id()
+                if action_id is not None:
+                    prop = treasury.find_action(treasury.gov_state(cluster), *action_id)
+                    if prop is None and submission_file.exists():
+                        signed_id = cluster.g_transaction.get_txid(tx_file=submission_file)
+                        if signed_id != action_id[0]:
+                            msg = "saved treasury proposal does not match pending claim"
+                            raise ValueError(msg)
+                        cluster.g_transaction.submit_tx_bare(tx_file=submission_file)
+                    if prop is not None:
+                        voters = treasury_voter.build_voters(cluster)
+                        treasury_voter.cast(cluster, source)
+                        prop = treasury.find_action(treasury.gov_state(cluster), *action_id)
+                        if (
+                            prop is not None
+                            and len(voters) == g.NUM_DREPS + g.NUM_CC
+                            and all(
+                                treasury_voter.recorded_vote(
+                                    prop, voter[0], treasury_voter.voter_hash(cluster, voter)
+                                )
+                                == "VoteYes"
+                                for voter in voters
+                            )
+                        ):
+                            sdk.sometimes(
+                                True,
+                                "treasury_withdrawal_setup_ready",
+                                {"txid": action_id[0], "epoch": g.current_epoch(cluster)},
+                            )
+                            return True
+            except Exception as exc:  # noqa: BLE001
+                print(f"guided treasury setup will retry: {exc}", file=sys.stderr)
+            time.sleep(5)
+    except Exception as exc:  # noqa: BLE001
+        print(f"guided treasury setup failed: {exc}", file=sys.stderr)
+    sdk.unreachable("treasury_withdrawal_setup_failed")
+    return False
+
+
 def main() -> int:
     sdk.reachable("first_setup entered")
     g.ensure_dirs()
@@ -247,6 +333,9 @@ def main() -> int:
 
     special_drep_addrs = _setup_special_dreps(cluster)
     _setup_treasury_recv_pool(cluster)
+
+    if not _prepare_treasury_payout(cluster):
+        return 1
 
     # DRep stake delegation takes effect at the next epoch boundary.
     try:

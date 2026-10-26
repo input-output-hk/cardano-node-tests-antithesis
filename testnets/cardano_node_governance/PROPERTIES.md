@@ -179,6 +179,19 @@ emitted false before their success paths, so an unexercised phase stays visible
 and fails coverage. The treasury workload applies to both Conway and Dijkstra;
 it does not change the Leios-only gates of the load and EB probes.
 
+Before the existing delegation epoch wait, setup funds a dedicated payment
+credential, donates enough treasury funds for one maximum withdrawal per
+recipient, and submits the guided withdrawal with confirmed YES votes from all
+DReps and committee members. Genesis starts with an empty treasury; the donation
+becomes available at the first epoch boundary, allowing ratification without
+waiting for natural reward funding. Fault exploration starts with the approved
+proposal pending settlement. Parallel lanes still exercise submission under
+faults. Ratification, exact payout and overpayment checks remain mandatory.
+Setup saves the exact signed proposal before journalling its action id and
+rebroadcasts that same transaction if submission was interrupted. Failed
+preparation prevents setup from completing. Protocol parameters and production
+epoch timing are unchanged.
+
 Treasury snapshot assertions include the receiver and action id, immutable slot
 and epoch, observed ratification epoch, submission validity bound, both proposal
 presence flags, and `waiting_reason`. The reason identifies a proposal still
@@ -189,6 +202,8 @@ do not add queries or change the accounting predicates or coverage requirements.
 
 | Assertion | Type | Meaning |
 |---|---|---|
+| `treasury_withdrawal_setup_ready` | Sometimes | setup confirmed the isolated guided proposal and every expected DRep/CC YES vote before its epoch wait |
+| `treasury_withdrawal_setup_failed` | **AlwaysOrUnreachable** | guided payout preparation exhausted retries or failed; setup cannot complete |
 | `treasury_withdrawal_enactment entered` | Reachable | checker ran |
 | `treasury_withdrawal_query_unavailable` | Sometimes | retryable query/snapshot failure; no claim is resolved from unavailable state |
 | `treasury_withdrawal_slot_reclaimed_after_abandonment` | Sometimes | a funds-receiving claim outlived a create-driver process that died mid-submit, and was self-healed |
