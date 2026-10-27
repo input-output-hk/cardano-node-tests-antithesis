@@ -18,14 +18,15 @@ from cardano_clusterlib import clusterlib
 STALE_CLAIM_EPOCHS = 2
 
 
-def observe(cluster: clusterlib.ClusterLib, idx: int, record: dict, live: dict) -> None:
+def observe(cluster: clusterlib.ClusterLib, idx: int, record: dict, live: dict) -> bool:
+    """Check one claim and return whether an exact terminal payout was witnessed."""
     if "txid" not in record:
         # No broadcast occurred: the action id is journalled before submission.
         tip = treasury.query(cluster, ["tip"], immutable=True)
         if tip["epoch"] - record["claimed_epoch"] >= STALE_CLAIM_EPOCHS:
             g.release_recv_slot(idx)
             sdk.sometimes(True, "treasury_withdrawal_slot_reclaimed_after_abandonment")
-        return
+        return False
 
     txid, ix = record["txid"], record["ix"]
     tip, state, balance = treasury.immutable_snapshot(cluster, record["recv_addr"])
@@ -76,14 +77,14 @@ def observe(cluster: clusterlib.ClusterLib, idx: int, record: dict, live: dict) 
             g.complete_recv_slot(idx, expires_after=expires_after)
             record["expires_after"] = expires_after
     if immutable_action or volatile_action:
-        return
+        return False
     # An uncertain submission is terminal only once a delayed inclusion is
     # impossible at the immutable tip.
     if tip["slot"] < record["valid_until"]:
-        return
+        return False
     if "ratified_epoch" in record:
         if tip["epoch"] <= record["ratified_epoch"]:
-            return
+            return False
         sdk.always(delta == expected, "treasury_withdrawal_payout_matches_ratification", details)
 
     paid = delta == expected
@@ -100,12 +101,13 @@ def observe(cluster: clusterlib.ClusterLib, idx: int, record: dict, live: dict) 
         if idx == treasury.EXPIRY_RECEIVER:
             sdk.always(delta == 0, "treasury_withdrawal_expired_no_payout", details)
             # Keep the isolated receiver to detect a delayed erroneous payment.
-            return
+            return False
     if idx == treasury.GUIDED_RECEIVER and paid:
         # Keep checking this recipient for the rest of the run. Reusing it
         # would hide a late duplicate in the next claim's baseline.
-        return
+        return paid
     g.release_recv_slot(idx)
+    return paid
 
 
 def main() -> int:

@@ -214,6 +214,31 @@ do not add queries or change the accounting predicates or coverage requirements.
 | `treasury_withdrawal_expired_no_payout` | **Always** | the isolated unvoted receiver remains unpaid after witnessed expiry, including on later checks |
 | `treasury_withdrawal_payout_matches_ratification` | **Always** | a terminal action with immutable ratification evidence paid exactly its transfer amount in a later epoch |
 
+## `eventually_treasury_withdrawal.py` — treasury settlement after fault recovery
+
+Applies to both Conway and Leios. Antithesis stops scheduling `anytime_`
+commands while terminal `eventually_` or `finally_` commands run, so the
+continuous observer alone cannot witness a later epoch during recovery.
+This dedicated recovery command polls the already-prepared guided recipient
+through ratification and settlement, using the same immutable accounting checks
+as the continuous observer. It submits no transactions or votes and does not
+depend on another workload's recovery command running first.
+
+The existing mandatory ratification and payout Sometimes assertions remain
+enabled. A successful recovery requires an exact terminal payout; missing
+claims, unavailable queries and stalled slots cannot count as success. Retry
+sleep is bounded by three genesis-derived epoch durations using a loop counter;
+exhaustion fails an Always assertion. Production k and epoch timing are unchanged.
+Other terminal commands may be selected on other timelines; this command is a
+separate treasury recovery path, not a guarantee that every timeline settles.
+
+| Assertion | Type | Meaning |
+|---|---|---|
+| `treasury_withdrawal_recovery entered` | Reachable | treasury recovery command ran |
+| `treasury_withdrawal_recovered` | **Always** | the guided withdrawal settled for exactly its requested amount within the recovery budget |
+| `treasury_withdrawal_recovery_aborted` | **AlwaysOrUnreachable** | an unexpected exception escaped the recovery logic |
+| `treasury_withdrawal_recovery_exits_zero` | **Always** | recovery command returned zero; failures are assertions |
+
 ## `parallel_driver_create_pparam_update.py` — submit one ParameterChange action
 
 Unlike the other two action types, this one is *chained*: the ledger
