@@ -84,6 +84,9 @@ governance state or pool configuration. The Leios workflow enables an additional
 human trace stream because the pinned node omits EB transaction references from
 its machine format. See `PROPERTIES.md` for the evidence required and fault
 handling; an ordinary-block payment does not count as certified-EB coverage.
+After fault scheduling stops, a Leios-only eventual driver continues submitting
+and observing these private payments through voting-committee warmup. It uses
+the same certificate and immutable-output checks, without extending global setup.
 
 Leios setup also registers the producers' generated BLS keys with their proofs
 of possession. Key files alone do not give a pool a voting key in the ledger.

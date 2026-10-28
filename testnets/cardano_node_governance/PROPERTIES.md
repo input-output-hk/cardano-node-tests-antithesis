@@ -404,9 +404,9 @@ Matching hashes across a fork is still coverage, not evidence of
 canonical-chain inclusion or successful certification. No shared cursor
 or persistent observation state is needed between driver invocations.
 
-## Isolated certified-EB payments — `parallel_driver_leios_transactions.py` / `anytime_leios_transactions.py`
+## Isolated certified-EB payments — `parallel_driver_leios_transactions.py` / `anytime_leios_transactions.py` / `eventually_leios_transactions.py`
 
-Enabled only by the v12 genesis used by `leios` and `leios-latest`; both drivers
+Enabled only by the v12 genesis used by `leios` and `leios-latest`; all three drivers
 emit no SDK properties in Conway, including their wrapper scaffolding. The
 Leios workflow selects `tracer-config-leios.yaml`, preserving machine logs and
 adding human logs under `/tracer/eb-human`. The pinned node exposes EB
@@ -444,10 +444,24 @@ records are retried after append. Up to 20,000 block headers are retained.
 Rotated or missing evidence can delay coverage, never establish inclusion.
 The checks impose no transaction latency or recovery deadline during faults.
 
+During terminal recovery, Antithesis no longer schedules the normal payment
+submitter and anytime observer. The eventual driver continues both operations
+with the same funds, lock and journal. It permits five genesis-derived epochs
+of polling sleeps for the BLS stake snapshot pipeline, fresh payments,
+certification and immutability, bounded by a counter if slots stop advancing.
+Expired or ordinary-ranking-block payments do not satisfy coverage; fresh
+recovery payments can provide the witness. Such a witness establishes recovery
+of certification, not that a newly submitted payment experienced faults.
+The same mandatory certification property and exact-output assertions apply;
+exhausting the polling budget does not manufacture successful coverage.
+
 | Assertion | Type | Meaning |
 |---|---|---|
 | `leios_transactions entered` | Reachable | isolated payment driver ran |
 | `leios_tx_tracking entered` | Reachable | certified-EB observer ran |
+| `leios_tx_recovery entered` | Reachable | Leios-only post-fault payment submission and observation ran |
+| `leios_tx_recovery_aborted` | Unreachable | unexpected failure escaped the Leios recovery driver |
+| `leios_tx_recovery_exits_zero` | Always | Leios recovery driver completed through the SDK wrapper |
 | `leios_tx_certified_and_immutable` | Sometimes | a tracked payment belongs to an EB certified by an immutable ranking block, has the expected serialized size, and has the exact expected immutable output; emitted false before evidence is available |
 | `leios_eb_tx_size_matches` | Always | the EB's size for a tracked signed transaction matches its serialized byte length |
 | `leios_certified_tx_payment_matches` | Always | after immutable certification is proven, the unspent output exists at the private recipient with exactly the expected lovelace and no additional assets |
