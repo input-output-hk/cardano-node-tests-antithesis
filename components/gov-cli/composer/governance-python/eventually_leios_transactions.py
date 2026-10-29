@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import math
 import time
 
 import anytime_leios_transactions as observer
@@ -13,9 +12,9 @@ import helper_sdk as sdk
 import parallel_driver_leios_transactions as submitter
 
 POLL_SECONDS = 5
-# Newly registered keys must traverse the stake snapshot pipeline. Allow
-# additional epochs for fresh payments, certification and immutability.
-RECOVERY_EPOCHS = 5
+# Genesis already seeds the committee. This command must finish promptly
+# even on a history that cannot supply a certified payment witness.
+RECOVERY_CHECKS = 24
 
 
 def main() -> int:
@@ -25,9 +24,7 @@ def main() -> int:
     sdk.sometimes(False, "leios_tx_certified_and_immutable", {"reason": "awaiting_recovery"})
     if not g.SETUP_MARKER.exists():
         return 0
-    cluster = g.make_cluster()
-    checks = math.ceil(RECOVERY_EPOCHS * cluster.epoch_length * cluster.slot_length / POLL_SECONDS)
-    for attempt in range(checks + 1):
+    for attempt in range(RECOVERY_CHECKS + 1):
         # The normal observer retires expired records at the immutable bound.
         # Reuse its exact certificate/output checks, even after an earlier hit.
         observer.main()
@@ -36,7 +33,7 @@ def main() -> int:
                 return 0
         # Earlier payments may have expired or landed in ordinary ranking
         # blocks before the committee was ready. Observation alone is not enough.
-        if attempt < checks:
+        if attempt < RECOVERY_CHECKS:
             submitter.main()
             time.sleep(POLL_SECONDS)
     # Missing certification still fails the mandatory Sometimes property;

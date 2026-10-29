@@ -85,13 +85,13 @@ human trace stream because the pinned node omits EB transaction references from
 its machine format. See `PROPERTIES.md` for the evidence required and fault
 handling; an ordinary-block payment does not count as certified-EB coverage.
 After fault scheduling stops, a Leios-only eventual driver continues submitting
-and observing these private payments through voting-committee warmup. It uses
+and observing these private payments for a short, fixed polling window. It uses
 the same certificate and immutable-output checks, without extending global setup.
 
-Leios setup also registers the producers' generated BLS keys with their proofs
-of possession. Key files alone do not give a pool a voting key in the ledger.
-This happens before fault injection, separately from the payment workload;
-Conway does not stage or register these assets.
+The Leios configurator seeds the producers' generated BLS keys and CLI-generated
+proofs of possession in genesis, so initial stake snapshots already contain
+voting keys. Setup verifies them before faults. This avoids several epochs of
+pool-update warmup without extending global setup. Conway generation is unchanged.
 
 Only `TX_FIREHOSE` is wired as a passthrough; the rest are read from the
 environment by `/entrypoint.sh` but not listed in the service, so

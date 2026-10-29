@@ -49,19 +49,20 @@ re-runs without it.
 | `payment_pool_funded` | Sometimes | the shared payment-address pool got funded |
 | `payment_pool_funding_failed` | Unreachable | funding the payment pool failed |
 | `governance_setup_complete` | Sometimes | setup finished end to end |
-| `leios_pool_keys_submitted` | Sometimes, Leios only | all generated producer BLS keys are active, pending, or submitted with proof of possession |
+| `leios_pool_keys_seeded` | Sometimes, Leios only | every producer's genesis voting key matches its staged BLS verification key in the active ledger before governance setup |
 | `leios_pool_keys_active` | Sometimes, Leios only | every producer's active ledger voting key matches its staged BLS verification key after the setup epoch wait |
-| `leios_pool_keys_setup_failed` | Unreachable, Leios only | voting-key registration or confirmation failed; setup returns 1 without enabling faults |
+| `leios_pool_keys_setup_failed` | Unreachable, Leios only | genesis voting-key verification failed; setup returns 1 without enabling faults |
 
-Leios bootstrap registers the BLS keys the producers already start with. Genesis
-pools initially have no ledger voting key. The configurator stages the matching
-VRF, reward and owner keys; setup submits a single pool-update transaction with
-the BLS proofs, cold-key and owner witnesses. It preserves pledge, cost, margin,
-VRF and reward account, and makes the generated owner stake key the pool owner
-(the genesis pools initially have no owners). Existing active or pending matching
-keys are not resubmitted. The normal setup epoch wait activates the updates;
-the Leios committee picks them up through its subsequent stake snapshot. This
-is baseline initialization, separate from the isolated payment workload.
+Leios bootstrap seeds the producer BLS keys and their proofs of possession in
+genesis before consensus constructs the initial stake snapshots. The configurator
+uses the same pinned Leios CLI as gov-cli to generate registration certificates,
+then extracts their key/proof pairs after checking the producer key and pool ID.
+Only the voting-key fields change; pledge, cost, margin, owners, VRF, reward
+account, stake delegation and funds remain intact. Both the pinned `leiosKey`
+and newer `blsKey` JSON spellings carry the same key/proof pair. Setup verifies
+active keys and fails rather than falling back to a delayed pool update.
+This replaces `leios_pool_keys_submitted`; there is no pool-update transaction
+or extra setup epoch wait. Conway does not seed or check these keys.
 
 ## `parallel_driver_create_action.py` — submit one InfoAction
 
@@ -446,9 +447,10 @@ The checks impose no transaction latency or recovery deadline during faults.
 
 During terminal recovery, Antithesis no longer schedules the normal payment
 submitter and anytime observer. The eventual driver continues both operations
-with the same funds, lock and journal. It permits five genesis-derived epochs
-of polling sleeps for the BLS stake snapshot pipeline, fresh payments,
-certification and immutability, bounded by a counter if slots stop advancing.
+with the same funds, lock and journal. Genesis already supplies voting keys to
+the initial snapshots. Recovery performs at most 25 observations, separated by
+24 five-second sleeps (120 seconds of sleeps plus command execution), rather
+than waiting several production epochs. It returns even if no witness appears.
 Expired or ordinary-ranking-block payments do not satisfy coverage; fresh
 recovery payments can provide the witness. Such a witness establishes recovery
 of certification, not that a newly submitted payment experienced faults.

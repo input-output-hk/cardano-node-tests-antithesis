@@ -55,76 +55,27 @@ def _leios_public_key(params: dict) -> str | None:
 
 
 def _leios_pool_keys(cluster: clusterlib.ClusterLib, *, confirm: bool = False) -> bool:
-    """Bootstrap node voting keys separately from all parallel workloads.
+    """Verify genesis voting keys before and after governance registration.
 
-    Genesis pools have no registered Leios key. Pool updates become active at
-    the next epoch; the committee's later snapshot picks them up naturally.
+    Never fall back to an on-chain pool update: its snapshot warmup would
+    outlive short recovery histories while appearing successfully registered.
     """
     genesis = json.loads((g.GOV_STATE_DIR / "shelley/genesis.json").read_text())
     if int(genesis["protocolParams"]["protocolVersion"]["major"]) < 12:
         return True
     try:
-        certificates, signing = [], []
         for index in range(1, g.NUM_POOLS + 1):
             pool = g.GOV / "pools" / f"node-pool{index}"
             vkey = bytes.fromhex(json.loads((pool / "bls.vkey").read_text())["cborHex"])
-            # Pinned CLI: a 96-byte public key in a definite CBOR byte string.
             if len(vkey) != 98 or vkey[:2] != bytes.fromhex("5860"):
                 msg = "unsupported BLS verification-key encoding"
                 raise ValueError(msg)
-            expected = vkey[2:].hex()
             pool_id = cluster.g_stake_pool.get_stake_pool_id(cold_vkey_file=pool / "cold.vkey")
             info = cluster.g_query.get_pool_state(pool_id)
-            active = _leios_public_key(info.pool_params)
-            pending = _leios_public_key(info.future_pool_params)
-            if active == expected or (not confirm and pending == expected):
-                continue
-            if confirm:
-                msg = f"pool {index} voting key is not active after the epoch boundary"
+            if _leios_public_key(info.pool_params) != vkey[2:].hex():
+                msg = f"pool {index} voting key was not seeded in genesis"
                 raise ValueError(msg)
-            params = info.pool_params
-            # These genesis pools have no metadata or relays. Do not silently
-            # erase those fields if the baseline is extended in future.
-            if params["spsRelays"] or params["spsMetadata"]:
-                msg = "Leios bootstrap needs registration support for pool relays/metadata"
-                raise ValueError(msg)
-            cert = g.WORK / f"leios_pool{index}.cert"
-            cluster.cli(
-                [
-                    "stake-pool",
-                    "registration-certificate",
-                    "--cold-verification-key-file",
-                    str(pool / "cold.vkey"),
-                    "--vrf-verification-key-file",
-                    str(pool / "vrf.vkey"),
-                    "--bls-signing-key-file",
-                    str(pool / "bls.skey"),
-                    "--pool-pledge",
-                    str(params["spsPledge"]),
-                    "--pool-cost",
-                    str(params["spsCost"]),
-                    "--pool-margin",
-                    str(params["spsMargin"]),
-                    "--pool-reward-account-verification-key-file",
-                    str(pool / "reward.vkey"),
-                    "--pool-owner-stake-verification-key-file",
-                    str(pool / "owner-stake.vkey"),
-                    "--testnet-magic",
-                    str(cluster.genesis["networkMagic"]),
-                    "--out-file",
-                    str(cert),
-                ]
-            )
-            certificates.append(cert)
-            signing.extend([pool / "cold.skey", pool / "owner-stake.skey"])
-        if certificates:
-            g.build_sign_submit(
-                cluster,
-                "setup_leios_pool_keys",
-                certificate_files=certificates,
-                signing_key_files=signing,
-            )
-        sdk.sometimes(True, "leios_pool_keys_active" if confirm else "leios_pool_keys_submitted")
+        sdk.sometimes(True, "leios_pool_keys_active" if confirm else "leios_pool_keys_seeded")
     except Exception as exc:  # noqa: BLE001
         print(f"Leios voting-key setup failed: {exc}", file=sys.stderr)
         sdk.unreachable("leios_pool_keys_setup_failed")

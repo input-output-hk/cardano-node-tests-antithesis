@@ -31,9 +31,8 @@ class LeiosRecovery(unittest.TestCase):
         self.marker = stack.enter_context(
             mock.patch.object(recovery.g.SETUP_MARKER.__class__, "exists", return_value=True)
         )
-        self.cluster = patch("eventually_leios_transactions.g.make_cluster").return_value
-        self.cluster.epoch_length, self.cluster.slot_length = 10, 1
-        patch("eventually_leios_transactions.RECOVERY_EPOCHS", new=1)
+        self.make_cluster = patch("eventually_leios_transactions.g.make_cluster")
+        patch("eventually_leios_transactions.RECOVERY_CHECKS", new=2)
         self.observe = patch("eventually_leios_transactions.observer.main")
         self.submit = patch("eventually_leios_transactions.submitter.main")
         patch(
@@ -95,6 +94,7 @@ class LeiosRecovery(unittest.TestCase):
             False, "leios_tx_certified_and_immutable", mock.ANY
         )
         self.sdk.always.assert_not_called()
+        self.make_cluster.assert_not_called()
 
 
 if __name__ == "__main__":

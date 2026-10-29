@@ -59,11 +59,11 @@ class LeiosBootstrap(unittest.TestCase):
         self.assertEqual(sdk.mock_calls, [])
         self.assertEqual(cluster.mock_calls, [])
 
-    def test_pending_matching_key_is_not_submitted_again(self):
+    def test_genesis_key_is_verified_without_pool_update(self):
         cluster = self.fixture()
         cluster.g_query.get_pool_state.return_value = mock.Mock(
-            pool_params={"spsLeiosKey": None},
-            future_pool_params={"spsLeiosKey": {"leiosPubKey": "01" * 96}},
+            pool_params={"spsLeiosKey": {"leiosPubKey": "01" * 96}},
+            future_pool_params={},
         )
         with (
             mock.patch.object(setup, "sdk"),
@@ -71,6 +71,17 @@ class LeiosBootstrap(unittest.TestCase):
         ):
             self.assertTrue(setup._leios_pool_keys(cluster))
         submit.assert_not_called()
+        cluster.cli.assert_not_called()
+
+    def test_missing_genesis_key_is_not_repaired_with_a_delayed_pool_update(self):
+        cluster = self.fixture()
+        cluster.g_query.get_pool_state.return_value = mock.Mock(
+            pool_params={"spsLeiosKey": None},
+            future_pool_params={},
+        )
+        with mock.patch.object(setup, "sdk") as sdk:
+            self.assertFalse(setup._leios_pool_keys(cluster))
+        sdk.unreachable.assert_called_once_with("leios_pool_keys_setup_failed")
         cluster.cli.assert_not_called()
 
     def test_pending_key_does_not_pass_active_confirmation(self):

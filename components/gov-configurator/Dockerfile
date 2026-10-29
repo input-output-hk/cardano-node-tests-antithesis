@@ -7,6 +7,19 @@
 # operations (CC hot-key auth, DRep registration, voting) are performed
 # later by the gov-cli composer drivers against relay1.
 
+# Same pinned CLI/node pair as gov-cli. Only the Leios genesis path uses
+# this binary; Conway keeps the stable release below.
+FROM nixos/nix:2.24.9 AS leios-cli-builder
+RUN printf 'experimental-features = nix-command flakes\nextra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=\nextra-substituters = https://cache.iog.io/\n' \
+    >> /etc/nix/nix.conf
+ARG LEIOS_NODE_REV=6a540bd43a83e697fd662b973f7e99cee02a59fb
+RUN CLI_OUT=$(nix build --accept-flake-config --no-write-lock-file --no-link --print-out-paths \
+        "github:IntersectMBO/cardano-node?ref=${LEIOS_NODE_REV}#cardano-cli") && \
+    mkdir -p /out/nix/store && \
+    nix-store --query --requisites "${CLI_OUT}" > /tmp/closure.txt && \
+    while read -r p; do cp -a "$p" /out/nix/store/; done < /tmp/closure.txt && \
+    ln -s "${CLI_OUT}/bin/cardano-cli" /out/cardano-cli-leios
+
 FROM debian:bookworm-slim
 
 # Pin cardonnay (cardano-node-tests tracks >=0.4.4,<0.5.0). 0.4.6 fixes
@@ -41,9 +54,14 @@ RUN curl -fsSL \
     rm -rf /tmp/cardano.tar.gz /tmp/bin
 
 # cardonnay ships both the CLI and the local_fast generation scripts.
-RUN python3 -m pip install --no-cache-dir --break-system-packages "cardonnay==${CARDONNAY_VERSION}"
+RUN python3 -m pip install --no-cache-dir --break-system-packages \
+        "cardonnay==${CARDONNAY_VERSION}" "cbor2==5.6.5"
+
+COPY --from=leios-cli-builder /out/nix/store /nix/store
+COPY --from=leios-cli-builder /out/cardano-cli-leios /usr/local/bin/cardano-cli-leios
 
 COPY generate.sh /generate.sh
+COPY seed_leios_genesis.py /seed_leios_genesis.py
 RUN chmod 0755 /generate.sh
 
 ENV USER=root \

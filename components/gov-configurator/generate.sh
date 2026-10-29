@@ -174,16 +174,21 @@ STATE="${GEN_ROOT}/state-cluster0"
 # cardano-node - the stable release, not the Leios-patched one that
 # actually runs in p1/p2/p3 - so it always fails here and silently skips
 # BLS key generation. Key generation itself needs no Leios-specific
-# runtime, only a cardano-cli that knows the dijkstra era (stable
-# cardano-cli 11.0.1 already does), so generate it ourselves instead of
-# relying on that gate.
+# runtime. Use the pinned Leios CLI for both generation and registration
+# proofs, instead of relying on that gate or the stable CLI's partial
+# Dijkstra support.
 if [ "$PROTOCOL_VERSION" -ge 12 ]; then
     echo "PROTOCOL_VERSION >= 12: generating BLS keys (Leios mode)"
     for ((i = 1; i <= NUM_POOLS; i++)); do
-        cardano-cli dijkstra node key-gen-BLS \
+        cardano-cli-leios dijkstra node key-gen-BLS \
             --verification-key-file "${STATE}/nodes/node-pool${i}/bls.vkey" \
             --signing-key-file "${STATE}/nodes/node-pool${i}/bls.skey"
     done
+    # Register the key and its CLI-generated proof before the initial stake
+    # snapshots are constructed. On-chain updates leave the committee keyless
+    # for several epochs, beyond short Antithesis recovery histories.
+    python3 /seed_leios_genesis.py "${STATE}/shelley/genesis.json" \
+        "${STATE}/nodes" "$NUM_POOLS" "$NETWORK_MAGIC"
 fi
 
 # ---------------------------------------------------------------------
@@ -230,12 +235,9 @@ for ((i = 1; i <= NUM_POOLS; i++)); do
     mkdir -p "/gov-data/pools/node-pool${i}"
     cp "${STATE}/nodes/node-pool${i}/cold.vkey" "/gov-data/pools/node-pool${i}/"
     cp "${STATE}/nodes/node-pool${i}/cold.skey" "/gov-data/pools/node-pool${i}/"
-    # The node's BLS signing key must also be registered with its proof of
-    # possession in the ledger. first_setup does that before fault injection.
+    # first_setup verifies the producer key against the genesis registration.
     if [ "$PROTOCOL_VERSION" -ge 12 ]; then
-        for file in bls.skey bls.vkey vrf.vkey reward.vkey owner-stake.vkey owner-stake.skey; do
-            cp "${STATE}/nodes/node-pool${i}/${file}" "/gov-data/pools/node-pool${i}/"
-        done
+        cp "${STATE}/nodes/node-pool${i}/bls.vkey" "/gov-data/pools/node-pool${i}/"
     fi
 done
 
