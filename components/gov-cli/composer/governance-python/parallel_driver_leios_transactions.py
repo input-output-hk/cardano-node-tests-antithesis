@@ -134,6 +134,7 @@ def main() -> int:
     with t.locked() as state:
         if state is None or state.get("complete"):
             return 0
+        t.start_tracking(state)
         try:
             cluster = g.make_cluster()
             slot = cluster.g_query.get_slot_no()

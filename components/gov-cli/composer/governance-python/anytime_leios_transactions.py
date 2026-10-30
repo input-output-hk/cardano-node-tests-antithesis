@@ -52,6 +52,9 @@ def main() -> int:
         if state is None:
             return 0
         t.ingest(state)
+        # A saved negative example should identify the missing stage, rather
+        # than merely saying that evidence has not arrived.
+        sdk.sometimes(False, "leios_tx_certified_and_immutable", t.progress(state))
         payments = state.get("payments", [])
         if not payments:
             return 0

@@ -78,6 +78,55 @@ def tx_reference(signed: pathlib.Path) -> tuple[str, int]:
     return hashlib.blake2b(raw, digest_size=32).hexdigest(), len(raw)
 
 
+def start_tracking(state: dict) -> None:
+    """Checkpoint setup-era logs before this workload can broadcast anything.
+
+    Old setup logs cannot contain a fresh workload's payments. Reading them
+    from byte zero can leave bounded readers behind the payments' expiry.
+    An existing journal must keep its cursors and evidence across upgrades.
+    Call under the journal lock, before either ingestion or submission.
+    """
+    if state.get("tracking_started"):
+        return
+    state["tracking_started"] = True
+    if any(state.get(key) for key in ("payments", "funding", "fanout", "complete")):
+        return
+    cursors = {}
+    for root in (LOGS, HUMAN_LOGS):
+        for path in root.glob("*/node-*"):
+            try:
+                stat = path.stat()
+                cursors[str(path)] = [stat.st_ino, stat.st_size]
+            except OSError:
+                continue
+    state["cursors"] = cursors
+    for key in ("headers", "announcements", "certificates"):
+        state[key] = {}
+
+
+def progress(state: dict) -> dict:
+    """Counts for failed coverage examples; none are a certification witness."""
+    payments = state.get("payments", [])
+    backlog = 0
+    for name, (inode, offset) in state.get("cursors", {}).items():
+        try:
+            stat = pathlib.Path(name).stat()
+            backlog += max(0, stat.st_size - offset) if stat.st_ino == inode else stat.st_size
+        except OSError:
+            continue
+    return {
+        "payments": len(payments),
+        "funding_journaled": bool(state.get("funding")),
+        "fanout_journaled": bool(state.get("fanout")),
+        "payments_in_eb": sum(bool(p.get("ebs")) for p in payments),
+        "immutable_payments": sum(bool(p.get("included")) for p in payments),
+        "announcements": len(state.get("announcements", {})),
+        "certificates": len(state.get("certificates", {})),
+        "headers": len(state.get("headers", {})),
+        "trace_backlog_bytes": backlog,
+    }
+
+
 def _cbor_head(major: int, value: int) -> bytes:
     if value < 24:
         return bytes([(major << 5) | value])
@@ -131,6 +180,7 @@ def _lines(path: pathlib.Path, cursors: dict) -> list[str]:
 
 
 def ingest(state: dict) -> None:
+    start_tracking(state)
     cursors = state.setdefault("cursors", {})
     headers = state.setdefault("headers", {})
     announcements = state.setdefault("announcements", {})

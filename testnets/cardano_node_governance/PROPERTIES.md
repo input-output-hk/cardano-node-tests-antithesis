@@ -442,15 +442,24 @@ coverage. UTxOs are queried between two matching immutable tip hashes.
 
 Reads are incremental and bounded to 8 MiB per file per invocation; partial
 records are retried after append. Up to 20,000 block headers are retained.
+Before this workload's first broadcast, it checkpoints existing logs at their
+ends under the journal lock. Setup-era history cannot contain its new payments
+and must not consume the bounded reader's recovery budget. Existing journals
+retain their cursors and evidence. Negative coverage examples include payment,
+EB-membership, certificate and header counts plus unread trace bytes.
 Rotated or missing evidence can delay coverage, never establish inclusion.
 The checks impose no transaction latency or recovery deadline during faults.
 
 During terminal recovery, Antithesis no longer schedules the normal payment
 submitter and anytime observer. The eventual driver continues both operations
 with the same funds, lock and journal. Genesis already supplies voting keys to
-the initial snapshots. Recovery performs at most 25 observations, separated by
-24 five-second sleeps (120 seconds of sleeps plus command execution), rather
-than waiting several production epochs. It returns even if no witness appears.
+the initial snapshots. Recovery allows four expected immutability intervals,
+derived from genesis `k / activeSlotsCoeff * slotLength`, with a minimum of
+24 five-second sleeps. At k=150, f=0.1 and slotLength=0.2 this is at most
+241 observations and 20 minutes of sleeps plus command execution. It returns
+immediately on a complete witness, and still returns if the budget expires.
+This gives newly submitted terminal payments and replacement batches time to
+become immutable without waiting several production epochs.
 Expired or ordinary-ranking-block payments do not satisfy coverage; fresh
 recovery payments can provide the witness. Such a witness establishes recovery
 of certification, not that a newly submitted payment experienced faults.

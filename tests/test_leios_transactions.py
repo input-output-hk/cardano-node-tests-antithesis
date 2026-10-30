@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import importlib
 import json
@@ -105,8 +106,10 @@ class CertifiedPayments(unittest.TestCase):
                 mock.patch.object(t, "LOGS", root),
                 mock.patch.object(t, "HUMAN_LOGS", root / "absent"),
             ):
-                state = {}
+                state = {"tracking_started": True}
                 t.ingest(state)
+            path = root / "p1/node-test.json"
+            self.assertEqual(state["cursors"][str(path)][1], path.stat().st_size)
             self.assertEqual(state["certificates"], {})
 
     def test_missing_output_fails_only_with_immutable_proof(self):
@@ -191,6 +194,95 @@ class CertifiedPayments(unittest.TestCase):
             with path.open("a") as f:
                 f.write("true}\n")
             self.assertEqual(t._lines(path, cursors), ['{"partial":true}'])
+
+    def test_setup_backlog_cannot_hide_a_fresh_certified_payment(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d)
+            machine, human = root / "machine/p1", root / "human/p1"
+            machine.mkdir(parents=True)
+            human.mkdir(parents=True)
+            machine_file, human_file = machine / "node-test.json", human / "node-test.log"
+            machine_file.write_text("{}\n" * 4096)
+            human_file.write_text("setup history\n" * 4096)
+            state = {}
+            with (
+                mock.patch.object(t, "LOGS", root / "machine"),
+                mock.patch.object(t, "HUMAN_LOGS", root / "human"),
+                mock.patch.object(t, "MAX_READ", 1024),
+            ):
+                # First observer runs before this workload has broadcast.
+                t.ingest(state)
+                for path in (machine_file, human_file):
+                    self.assertEqual(state["cursors"][str(path)][1], path.stat().st_size)
+                state["payments"] = [self.payment]
+                body = (
+                    "EB forged at slot SlotNo 90: MkLeiosEb {leiosEbTxs = [(" + "1" * 64 + ",250)]}"
+                )
+                eb_hash = t.eb_references(body)[0]
+                block, parent = "3" * 64, "4" * 64
+                events = [
+                    {"kind": "TraceForgedBlock", "block": block, "blockPrev": parent, "slot": 100},
+                    {
+                        "kind": "LeiosBlockAnnounced",
+                        "rbHash": parent,
+                        "ebHash": eb_hash,
+                        "ebSlot": 90,
+                    },
+                    {"kind": "LeiosCertifiedAndAnnounced", "rbHash": block, "slotNo": 100},
+                ]
+                with machine_file.open("a") as stream:
+                    for event in events:
+                        stream.write(json.dumps({"host": "p1", "data": event}) + "\n")
+                with human_file.open("a") as stream:
+                    stream.write(body + "\n")
+                t.ingest(state)
+                proof = t.certified_payment(
+                    state, self.payment, t.immutable_ancestors(state, block)
+                )
+                self.assertEqual(proof["eb_hash"], eb_hash)
+
+    def test_existing_journal_keeps_unread_evidence_after_upgrade(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d)
+            (root / "p1").mkdir()
+            path = root / "p1/node-test.log"
+            body = "EB forged at slot SlotNo 90: MkLeiosEb {leiosEbTxs = [(" + "1" * 64 + ",250)]}"
+            path.write_text(body + "\n")
+            state = {"payments": [self.payment]}
+            with (
+                mock.patch.object(t, "LOGS", root / "absent"),
+                mock.patch.object(t, "HUMAN_LOGS", root),
+            ):
+                t.ingest(state)
+            self.assertIn(t.eb_references(body)[0], self.payment["ebs"])
+
+    def test_submitter_checkpoints_before_first_broadcast(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d)
+            (root / "p1").mkdir()
+            path = root / "p1/node-test.json"
+            path.write_text("setup\n" * 4096)
+            state = {}
+            checkpoints = []
+
+            def broadcast(_cluster, journal):
+                checkpoints.append(
+                    (journal.get("tracking_started"), journal.get("cursors", {}).get(str(path)))
+                )
+
+            with (
+                mock.patch.object(t, "enabled", return_value=True),
+                mock.patch.object(t, "LOGS", root),
+                mock.patch.object(t, "HUMAN_LOGS", root / "absent"),
+                mock.patch.object(t, "locked", return_value=contextlib.nullcontext(state)),
+                mock.patch.object(submitter.g.SETUP_MARKER.__class__, "exists", return_value=True),
+                mock.patch.object(submitter.g, "make_cluster"),
+                mock.patch.object(submitter, "submit_payments", side_effect=broadcast) as send,
+                mock.patch.object(submitter, "sdk"),
+            ):
+                self.assertEqual(submitter.main(), 0)
+                send.assert_called_once()
+            self.assertEqual(checkpoints, [(True, [path.stat().st_ino, path.stat().st_size])])
 
 
 if __name__ == "__main__":

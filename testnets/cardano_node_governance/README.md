@@ -85,8 +85,11 @@ human trace stream because the pinned node omits EB transaction references from
 its machine format. See `PROPERTIES.md` for the evidence required and fault
 handling; an ordinary-block payment does not count as certified-EB coverage.
 After fault scheduling stops, a Leios-only eventual driver continues submitting
-and observing these private payments for a short, fixed polling window. It uses
+and observing these private payments for a bounded polling window derived from
+the genesis immutability parameters. It uses
 the same certificate and immutable-output checks, without extending global setup.
+The workload checkpoints setup logs before its first broadcast so the bounded
+reader follows its own payments rather than processing the entire setup history.
 
 The Leios configurator seeds the producers' generated BLS keys and CLI-generated
 proofs of possession in genesis, so initial stake snapshots already contain

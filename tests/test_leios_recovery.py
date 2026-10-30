@@ -19,6 +19,20 @@ sys.path.insert(
 recovery = importlib.import_module("eventually_leios_transactions")
 
 
+class RecoveryBudget(unittest.TestCase):
+    def test_production_budget_covers_fresh_payments_and_immutability(self):
+        cluster = mock.Mock(
+            genesis={"securityParam": 150, "activeSlotsCoeff": 0.1}, slot_length=0.2
+        )
+        with mock.patch.object(recovery.g, "make_cluster", return_value=cluster):
+            self.assertEqual(recovery.recovery_checks(), 240)
+
+    def test_short_network_keeps_minimum_bounded_window(self):
+        cluster = mock.Mock(genesis={"securityParam": 8, "activeSlotsCoeff": 0.1}, slot_length=0.2)
+        with mock.patch.object(recovery.g, "make_cluster", return_value=cluster):
+            self.assertEqual(recovery.recovery_checks(), 24)
+
+
 class LeiosRecovery(unittest.TestCase):
     def setUp(self):
         stack = self.enterContext(contextlib.ExitStack())
@@ -32,7 +46,7 @@ class LeiosRecovery(unittest.TestCase):
             mock.patch.object(recovery.g.SETUP_MARKER.__class__, "exists", return_value=True)
         )
         self.make_cluster = patch("eventually_leios_transactions.g.make_cluster")
-        patch("eventually_leios_transactions.RECOVERY_CHECKS", new=2)
+        patch("eventually_leios_transactions.recovery_checks", return_value=2)
         self.observe = patch("eventually_leios_transactions.observer.main")
         self.submit = patch("eventually_leios_transactions.submitter.main")
         patch(
