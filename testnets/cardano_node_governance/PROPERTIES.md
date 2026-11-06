@@ -494,6 +494,55 @@ exhausting the polling budget does not manufacture successful coverage.
 | `governance_run_completed` | Sometimes | the gov-cli lifecycle reached end-of-test |
 | `finally_governance_summary entered` | Reachable | marker ran |
 
+## Opt-in pinned Leios SQLite recovery
+
+Enabled only by workflow input `leios_storage: true` with `mode: leios`.
+Conway, scheduled runs and ordinary Leios runs emit none of these properties,
+including wrapper assertions. `leios-latest` is rejected because its SQLite
+schema can differ from the pinned prototype's single `leios.db`.
+
+The workload observes a dedicated **non-producing**, faulted `storage-node`.
+The observer reads that node's socket and database through a read-only mount.
+An independent payment stream uses this scenario's own keys, funds and locked
+journal under `/gov-data/leios_storage/payments`, and continues through final
+recovery. It changes no parameters and never reads the payment tracker's journal
+or completion flag. The two scenarios share only the stateless payment builder.
+Producer traces establish the actual certified RB's ancestry at this node's
+immutable tip. SQLite rows must reconstruct the announced nonempty EB hash;
+each closure transaction must match its referenced serialized hash and size.
+The first such fingerprint becomes a permanent baseline.
+
+| Assertion | Type | Meaning |
+|---|---|---|
+| `leios_storage entered` | Reachable | the opt-in observer ran |
+| `leios_storage_recovery entered` | Reachable | the post-fault recovery driver ran |
+| `leios_storage_traffic entered` | Reachable | the scenario's independent payment driver ran |
+| `leios_storage_baseline` | Sometimes | a nonempty immutable certified EB body and complete closure were read and verified |
+| `leios_storage_restart_observed` | Sometimes | the node socket was recreated after the baseline was recorded |
+| `leios_storage_recovered` | Sometimes | after a restart, the baseline still matches and a further complete immutable certified EB lies beyond both the last observed pre-restart head and the first post-restart head |
+| `leios_storage_integrity` | Always | a stable SQLite snapshot passes `quick_check`, checked at baseline acquisition and after reopening; a stable corrupt/not-a-database read also fails this invariant |
+| `leios_storage_certified_eb_preserved` | Always | once the node catches up to the baseline's certifying slot, its EB body and complete closure still match the original fingerprint |
+| `leios_storage_query_unavailable` | Sometimes, optional | a fault interrupted a query or file read; this supplies no recovery evidence |
+| `leios_storage_submission_unavailable` | Sometimes, optional | a fault interrupted the scenario's own payment preparation or submission |
+
+The wrappers use `leios_storage_exits_zero` / `leios_storage_aborted` and
+`leios_storage_recovery_exits_zero` / `leios_storage_recovery_aborted` as above.
+The traffic wrapper uses `leios_storage_traffic_exits_zero` /
+`leios_storage_traffic_aborted`.
+Mandatory coverage is registered before the setup guard: missing setup, an
+unsupported schema, no post-baseline restart, or no recovery cannot silently
+produce a successful storage scenario. Individual read failures remain unknown.
+Socket identity and the immutable point are checked around each DB snapshot;
+live WAL data is included, and the checker never opens SQLite with `immutable=1`.
+
+Antithesis supplies restarts; the drivers never issue Docker commands or force
+faults themselves. This tests recovery from container/process restarts, not
+host power-loss durability. The node is not a producer: recovery proves storage
+preservation and continued validation, not that this node cast fresh votes.
+After faults stop, polling allows four genesis-derived immutability windows
+(minimum two minutes), using only this scenario's journal and funds. Previously
+recorded recovery cannot end the poll while the latest node probe is unavailable.
+
 ## Always vs Sometimes: two different questions, both useful
 
 `always` and `sometimes` aren't a strong/weak pair — they check different
