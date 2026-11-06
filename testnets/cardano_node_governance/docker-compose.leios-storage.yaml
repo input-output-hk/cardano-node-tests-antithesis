@@ -1,0 +1,20 @@
+# Opt-in only; scripts/enable-leios-storage.sh flattens this AFTER the
+# workflow has selected the pinned Leios image. Never used by Conway.
+services:
+  storage-node:
+    extends:
+      file: docker-compose.yaml
+      service: relay1
+    container_name: storage-node
+    hostname: storage-node.example
+    labels:
+      com.antithesis.exclude_from_faults: ""
+    volumes:
+      - leios-storage-state:/state
+  gov-cli:
+    environment:
+      LEIOS_STORAGE_CHECKS: "true"
+    volumes:
+      - leios-storage-state:/leios-storage:ro
+volumes:
+  leios-storage-state:

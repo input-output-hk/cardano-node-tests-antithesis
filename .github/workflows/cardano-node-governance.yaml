@@ -24,6 +24,10 @@ on:
         type: choice
         options: [conway, leios, leios-latest]
         default: conway
+      leios_storage:
+        description: "Opt-in SQLite crash recovery (pinned leios only)"
+        type: boolean
+        default: false
   schedule:
     # run once a week
     - cron: '5 1 * * 1'
@@ -67,7 +71,16 @@ jobs:
     # have no inputs context at all, hence the fallback to "conway".
     - name: Determine testnet mode
       id: mode
-      run: echo "mode=${{ inputs.mode || 'conway' }}" >> "$GITHUB_OUTPUT"
+      env:
+        MODE: ${{ inputs.mode || 'conway' }}
+        LEIOS_STORAGE: ${{ inputs.leios_storage || false }}
+      run: |
+        set -euo pipefail
+        if [[ "$LEIOS_STORAGE" == "true" && "$MODE" != "leios" ]]; then
+          echo "SQLite recovery requires pinned leios mode" >&2
+          exit 1
+        fi
+        echo "mode=$MODE" >> "$GITHUB_OUTPUT"
 
     - name: Install Nix
       uses: cachix/install-nix-action@v31
@@ -165,6 +178,7 @@ jobs:
       id: leios-patch
       if: steps.mode.outputs.mode == 'leios' || steps.mode.outputs.mode == 'leios-latest'
       env:
+        LEIOS_STORAGE: ${{ inputs.leios_storage || false }}
         LEIOS_NODE_IMAGE: >-
           ${{ steps.mode.outputs.mode == 'leios-latest'
               && 'ghcr.io/input-output-hk/ouroboros-leios/cardano-node-leios:latest'
@@ -179,6 +193,10 @@ jobs:
           -e 's|\${NODE_EXTRA_ARGS:-}|${NODE_EXTRA_ARGS:---shelley-bls-key /configs/keys/bls.skey}|' \
           -e 's|./tracer-config.yaml:|./tracer-config-leios.yaml:|' \
           "$COMPOSE"
+
+        if [[ "$LEIOS_STORAGE" == "true" ]]; then
+          bash scripts/enable-leios-storage.sh "$TESTNET"
+        fi
 
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -298,12 +316,15 @@ jobs:
         # this reflects what really ran even if a step above was
         # skipped or a default silently applied.
         COMPOSE="$TESTNET/docker-compose.yaml"
-        NODE_IMG=$(grep -oP '(?<=NODE_IMAGE:-)[^}]+' "$COMPOSE" | head -1)
-        PROTOCOL_VER=$(grep -oP 'PROTOCOL_VERSION: \$\{PROTOCOL_VERSION:-\K[0-9]+' "$COMPOSE" | head -1)
-        CMD_ERA=$(grep -oP 'GOV_COMMAND_ERA: \$\{GOV_COMMAND_ERA:-\K[a-z]+' "$COMPOSE" | head -1)
-        GOV_CLI_IMG=$(grep -oP 'gov-cli@sha256:[0-9a-f]+' "$COMPOSE" | head -1)
-        GOV_CONFIGURATOR_IMG=$(grep -oP 'gov-configurator@sha256:[0-9a-f]+' "$COMPOSE" | head -1)
-        TX_FIREHOSE_IMG=$(grep -oP 'tx-firehose@sha256:[0-9a-f]+' "$COMPOSE" | head -1)
+        # Storage runs have been flattened after mode selection, so their
+        # values are literals rather than ${VAR:-default} expressions.
+        CONFIG=$(docker compose -f "$COMPOSE" config --format json)
+        NODE_IMG=$(jq -r '.services.p1.image' <<< "$CONFIG")
+        PROTOCOL_VER=$(jq -r '.services["gov-configurator"].environment.PROTOCOL_VERSION' <<< "$CONFIG")
+        CMD_ERA=$(jq -r '.services["gov-cli"].environment.GOV_COMMAND_ERA' <<< "$CONFIG")
+        GOV_CLI_IMG=$(jq -r '.services["gov-cli"].image' <<< "$CONFIG")
+        GOV_CONFIGURATOR_IMG=$(jq -r '.services["gov-configurator"].image' <<< "$CONFIG")
+        TX_FIREHOSE_IMG=$(jq -r '.services["tx-firehose"].image' <<< "$CONFIG")
 
         {
           echo "### Antithesis test run"

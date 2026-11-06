@@ -18,6 +18,37 @@ partition leaves a 2-vs-1 majority to anchor the canonical chain; the
 single relay is kept out of faults so the governance drivers always
 have a reachable node.
 
+## Optional Leios SQLite recovery
+
+The Antithesis workflow has a `leios_storage` checkbox, default **off**. It is
+accepted only with pinned `leios`; Conway and `leios-latest` reject it before
+test submission. Existing default runs retain their topology and properties.
+
+This adds one non-producing fault target, `storage-node`, with a separate
+`leios-storage-state` volume. The checker receives read-only database/socket
+access. It fingerprints a complete, nonempty immutable certified EB, checks
+that its body and transaction closure survive a restart, and requires further
+immutable certification after the node reopens. A separate driver provides
+bounded payments using its own funds, keys and journal, including during final
+recovery, so another workload completing cannot leave this check without traffic.
+It changes no producer databases, BLS keys, governance parameters or existing
+payment journals. The payment builder is reused with a separate account and
+persistence interface; the existing payment scenario keeps its default behavior.
+The assertion definitions and limitations are in [PROPERTIES.md](PROPERTIES.md#opt-in-pinned-leios-sqlite-recovery).
+
+`docker-compose.leios-storage.yaml` is an optional overlay. The workflow first
+selects pinned Leios using the existing substitutions, then runs
+`scripts/enable-leios-storage.sh` to flatten the overlay into the run branch's
+compose file, because moog reads only that committed file. The base compose
+source and its load-bearing substitutions remain unchanged. For a local run,
+select the pinned Leios image/protocol/CLI first, then merge this overlay; use
+fresh volumes and the [local validation skill](../../.agents/skills/validate-testnet/SKILL.md).
+
+Selecting this scenario requires a post-baseline restart and subsequent recovery
+to be observed; a run that never exercises them fails coverage. It currently
+supports the pinned prototype's `ebs` / `ebTxs` / `txs` schema only, not upstream's
+new split volatile/immutable databases. No image upgrade is included.
+
 ## Leios load (`tx-firehose`)
 
 Leios's endorser blocks only certify transactions that are already in
