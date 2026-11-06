@@ -12,7 +12,16 @@ import helper_sdk as sdk
 from cardano_clusterlib import clusterlib
 
 
-def submit_payments(cluster: clusterlib.ClusterLib, state: dict) -> None:
+def submit_payments(cluster: clusterlib.ClusterLib, state: dict, workload: object = t) -> None:
+    """Build payments using the caller's accounts, bounds and durable journal.
+
+    The storage scenario supplies its own namespace; the default preserves the
+    existing certified-payment workload's behavior.
+    """
+    _submit_payments(cluster, state, workload)
+
+
+def _submit_payments(cluster: clusterlib.ClusterLib, state: dict, t: object) -> None:
     source, recipient = t.account(cluster, "source"), t.account(cluster, "recipient")
     tip = cluster.g_query.get_tip()
     expiry = tip["slot"] + min(cluster.epoch_length, 1500)

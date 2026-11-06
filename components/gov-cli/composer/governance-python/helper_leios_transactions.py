@@ -137,6 +137,17 @@ def _cbor_head(major: int, value: int) -> bytes:
     raise ValueError(msg)
 
 
+def eb_body_hash(refs: list[tuple[str, int]]) -> str:
+    """Hash the pinned node's ordered definite-map EB encoding."""
+    encoded = _cbor_head(5, len(refs))
+    for tx_hash, size in refs:
+        if len(bytes.fromhex(tx_hash)) != 32 or not 0 <= size < 1 << 32:
+            msg = "invalid EB transaction reference"
+            raise ValueError(msg)
+        encoded += _cbor_head(2, 32) + bytes.fromhex(tx_hash) + _cbor_head(0, size)
+    return hashlib.blake2b(encoded, digest_size=32).hexdigest()
+
+
 def eb_references(line: str) -> tuple[str, dict[str, int]] | None:
     """Recompute the EB hash from its complete ordered body, not host/slot guesses.
 
@@ -150,12 +161,9 @@ def eb_references(line: str) -> tuple[str, dict[str, int]] | None:
     refs = TX_REF.findall(body)
     if not refs or TX_REF.sub("", body).replace(",", "").strip():
         return None
-    encoded = _cbor_head(5, len(refs))
-    for tx_hash, size in refs:
-        if int(size) >= 1 << 32:
-            return None
-        encoded += _cbor_head(2, 32) + bytes.fromhex(tx_hash) + _cbor_head(0, int(size))
-    return hashlib.blake2b(encoded, digest_size=32).hexdigest(), {
+    if any(int(size) >= 1 << 32 for _, size in refs):
+        return None
+    return eb_body_hash([(h, int(s)) for h, s in refs]), {
         tx_hash: int(size) for tx_hash, size in refs
     }
 
