@@ -24,6 +24,7 @@ import helper_leios_storage_traffic as traffic
 
 observer = importlib.import_module("anytime_leios_storage")
 submitter = importlib.import_module("parallel_driver_leios_storage")
+preparation = importlib.import_module("helper_leios_storage_setup")
 
 SCHEMA = """
 CREATE TABLE ebs(ebSlot INTEGER, ebHashBytes BLOB, missingTxCount INTEGER);
@@ -256,7 +257,116 @@ class Gating(unittest.TestCase):
                     self.assertEqual(exited.exception.code, 0)
                 locked.assert_not_called()
                 observe.assert_not_called()
+                self.assertTrue(preparation.prepare())
                 emit.assert_not_called()
+
+
+class SetupScheduling(unittest.TestCase):
+    def setUp(self):
+        self.state = {}
+        mock.patch.object(storage, "enabled", return_value=True).start()
+        mock.patch.object(
+            storage, "locked", side_effect=lambda: contextlib.nullcontext(self.state)
+        ).start()
+        mock.patch.object(preparation.timing, "recovery_checks", return_value=2).start()
+        self.sleep = mock.patch.object(preparation.time, "sleep").start()
+        self.observe = mock.patch.object(storage, "observe").start()
+        self.supply = mock.patch.object(submitter, "supply").start()
+        self.sdk = mock.patch.object(preparation, "sdk").start()
+        self.addCleanup(mock.patch.stopall)
+
+    def test_disabled_setup_never_reads_storage_or_queries_timing(self):
+        with (
+            mock.patch.object(storage, "enabled", return_value=False),
+            mock.patch.object(preparation.timing, "recovery_checks") as checks,
+        ):
+            self.assertTrue(preparation.prepare())
+        checks.assert_not_called()
+        self.observe.assert_not_called()
+        self.supply.assert_not_called()
+        self.sdk.unreachable.assert_not_called()
+
+    def test_baseline_is_prepared_before_setup_marker_or_other_drivers(self):
+        def observe(state):
+            if self.supply.call_count:
+                state.update(baseline={"proof": "immutable"}, last_probe_ok=True)
+
+        self.observe.side_effect = observe
+        self.assertTrue(preparation.prepare())
+        self.supply.assert_called_once_with(self.state)
+        self.assertNotIn("restart_slot", self.state)
+        self.sdk.unreachable.assert_not_called()
+
+    def test_missing_baseline_fails_setup_instead_of_releasing_faults(self):
+        self.assertFalse(preparation.prepare())
+        self.assertEqual(self.observe.call_count, 3)
+        self.assertEqual(self.supply.call_count, 2)
+        self.sdk.unreachable.assert_called_once_with("leios_storage_setup_failed")
+
+    def test_stale_baseline_cannot_bypass_current_read_failure(self):
+        self.state.update(baseline={"proof": "old"}, last_probe_ok=False)
+        self.assertFalse(preparation.prepare())
+
+    def test_transient_read_failure_is_retried_before_release(self):
+        def observe(state):
+            if self.observe.call_count == 1:
+                raise OSError("node starting")
+            state.update(baseline={"proof": "immutable"}, last_probe_ok=True)
+
+        self.observe.side_effect = observe
+        self.assertTrue(preparation.prepare())
+        self.assertEqual(self.observe.call_count, 2)
+        self.sdk.unreachable.assert_not_called()
+
+    def test_restarted_setup_cannot_signal_complete_without_storage_baseline(self):
+        setup = importlib.import_module("first_setup")
+        with (
+            mock.patch.object(setup.g, "ensure_dirs"),
+            mock.patch.object(setup.g.SETUP_MARKER.__class__, "exists", return_value=True),
+            mock.patch.object(preparation, "prepare", return_value=False),
+            mock.patch.object(setup, "sdk") as sdk,
+        ):
+            self.assertEqual(setup.main(), 1)
+        sdk.setup_complete.assert_not_called()
+
+    def test_fresh_setup_publishes_marker_only_after_preparation_succeeds(self):
+        setup = importlib.import_module("first_setup")
+        for ready in [False, True]:
+            with tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                marker = root / "setup_done"
+
+                def prepare():
+                    self.assertFalse(marker.exists())
+                    return ready
+
+                with (
+                    self.subTest(ready=ready),
+                    mock.patch.multiple(
+                        setup.g,
+                        SETUP_MARKER=marker,
+                        PAYMENT_POOL=root / "payments",
+                        NUM_DREPS=0,
+                        NUM_CC=0,
+                        NUM_PAYMENT_ADDRS=0,
+                        ensure_dirs=mock.Mock(),
+                        make_cluster=mock.Mock(),
+                        wait_for_node=mock.Mock(return_value=True),
+                        wait_for_epoch=mock.Mock(),
+                        build_sign_submit=mock.Mock(),
+                        current_epoch=mock.Mock(return_value=0),
+                    ),
+                    mock.patch.object(setup, "_leios_pool_keys", return_value=True),
+                    mock.patch.object(setup, "_setup_special_dreps", return_value=[]),
+                    mock.patch.object(setup, "_confirm_special_dreps"),
+                    mock.patch.object(setup, "_setup_treasury_recv_pool"),
+                    mock.patch.object(setup, "_prepare_treasury_payout", return_value=True),
+                    mock.patch.object(preparation, "prepare", side_effect=prepare),
+                    mock.patch.object(setup, "sdk") as sdk,
+                ):
+                    self.assertEqual(setup.main(), 0 if ready else 1)
+                self.assertEqual(marker.exists(), ready)
+                self.assertEqual(sdk.setup_complete.call_count, int(ready))
 
 
 class IsolatedTraffic(unittest.TestCase):

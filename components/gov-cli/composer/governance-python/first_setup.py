@@ -37,6 +37,7 @@ import sys
 import time
 
 import helper_gov as g
+import helper_leios_storage_setup as storage_setup
 import helper_sdk as sdk
 import helper_treasury as treasury
 import parallel_driver_create_treasury_withdrawal as treasury_creator
@@ -318,6 +319,8 @@ def main() -> int:
     g.ensure_dirs()
 
     if g.SETUP_MARKER.exists():
+        if not storage_setup.prepare():
+            return 1
         sdk.sometimes(True, "governance_setup_already_done")
         sdk.setup_complete()
         return 0
@@ -426,6 +429,8 @@ def main() -> int:
         sdk.unreachable("payment_pool_funding_failed")
         return 1
 
+    if not storage_setup.prepare():
+        return 1
     g.SETUP_MARKER.touch()
     sdk.sometimes(True, "governance_setup_complete")
     sdk.setup_complete()

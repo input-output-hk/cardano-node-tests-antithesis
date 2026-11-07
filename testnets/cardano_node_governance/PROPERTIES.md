@@ -510,7 +510,11 @@ or completion flag. The two scenarios share only the stateless payment builder.
 Producer traces establish the actual certified RB's ancestry at this node's
 immutable tip. SQLite rows must reconstruct the announced nonempty EB hash;
 each closure transaction must match its referenced serialized hash and size.
-The first such fingerprint becomes a permanent baseline.
+The first such fingerprint becomes a permanent baseline. In the opt-in scenario,
+`first_setup` must verify this baseline before returning: Antithesis suppresses
+faults and other commands until that first command completes. Preparation uses
+only this scenario's observer, funds and journal, with the same bounded polling
+budget as recovery. It does not rely on another workload having run.
 
 | Assertion | Type | Meaning |
 |---|---|---|
@@ -524,6 +528,8 @@ The first such fingerprint becomes a permanent baseline.
 | `leios_storage_certified_eb_preserved` | Always | once the node catches up to the baseline's certifying slot, its EB body and complete closure still match the original fingerprint |
 | `leios_storage_query_unavailable` | Sometimes, optional | a fault interrupted a query or file read; this supplies no recovery evidence |
 | `leios_storage_submission_unavailable` | Sometimes, optional | a fault interrupted the scenario's own payment preparation or submission |
+| `leios_storage_setup_failed` | Unreachable | opt-in setup could not verify its baseline within its bounded preparation budget; faults must not be released with an unprepared scenario |
+| `leios_storage_observation` | Sometimes, optional | stable snapshot diagnostics: socket identity, volatile/immutable tips, baseline, restart boundary and recovery status |
 
 The wrappers use `leios_storage_exits_zero` / `leios_storage_aborted` and
 `leios_storage_recovery_exits_zero` / `leios_storage_recovery_aborted` as above.

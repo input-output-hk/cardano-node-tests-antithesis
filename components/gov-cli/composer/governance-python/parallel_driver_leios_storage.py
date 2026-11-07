@@ -12,6 +12,18 @@ import helper_sdk as sdk
 from parallel_driver_leios_transactions import submit_payments
 
 
+def supply(state: dict) -> None:
+    """Supply this scenario's traffic under its lock, including during setup."""
+    cluster = g.make_cluster()
+    tip = json.loads(cluster.g_query.query_cli(["tip"], cli_sub_args=["--immutable-tip"]))
+    journal = state.setdefault("traffic", {})
+    # Only immutable expiry retires a batch; no other workload's
+    # execution or completion flag can stop this traffic.
+    journal["payments"] = [p for p in journal.get("payments", []) if p["expiry"] > tip["slot"]]
+    if len(journal["payments"]) < traffic.Traffic.MAX_PAYMENTS:
+        submit_payments(cluster, journal, workload=traffic.Traffic(state))
+
+
 def main() -> int:
     if not storage.enabled():
         return 0
@@ -22,16 +34,7 @@ def main() -> int:
         if state is None or state.get("recovered"):
             return 0
         try:
-            cluster = g.make_cluster()
-            tip = json.loads(cluster.g_query.query_cli(["tip"], cli_sub_args=["--immutable-tip"]))
-            journal = state.setdefault("traffic", {})
-            # Only immutable expiry retires a batch; no other workload's
-            # execution or completion flag can stop this traffic.
-            journal["payments"] = [
-                p for p in journal.get("payments", []) if p["expiry"] > tip["slot"]
-            ]
-            if len(journal["payments"]) < traffic.Traffic.MAX_PAYMENTS:
-                submit_payments(cluster, journal, workload=traffic.Traffic(state))
+            supply(state)
         except Exception as exc:  # noqa: BLE001
             sdk.sometimes(
                 True, "leios_storage_submission_unavailable", {"error": str(exc)}, must_hit=False

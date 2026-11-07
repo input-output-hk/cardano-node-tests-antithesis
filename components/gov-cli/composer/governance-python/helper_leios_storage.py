@@ -155,7 +155,7 @@ def assess(
         # Replaying pre-crash certificates must not count as fresh progress.
         boundary = max(head["slot"], state["observed_head"], baseline["proof"]["cert_slot"])
         state.update(socket=socket, restart_slot=boundary, recovered=False)
-        sdk.sometimes(True, "leios_storage_restart_observed", {"head": head})
+        sdk.sometimes(True, "leios_storage_restart_observed", {"head": head, "socket": socket})
     state["observed_head"] = max(state["observed_head"], head["slot"])
     if tip["slot"] < baseline["proof"]["cert_slot"]:
         return  # The reopened node has not caught up to the baseline yet.
@@ -200,4 +200,17 @@ def observe(state: dict) -> None:
     if tip["hash"] != after["hash"] or socket != identity(SOCKET) or database != identity(DB)[:2]:
         return
     assess(state, tip, head, socket, proofs, snapshots, integrity)
+    sdk.sometimes(
+        True,
+        "leios_storage_observation",
+        {
+            "socket": socket,
+            "head": head,
+            "immutable_tip": tip,
+            "baseline": state.get("baseline"),
+            "restart_slot": state.get("restart_slot"),
+            "recovered": state.get("recovered", False),
+        },
+        must_hit=False,
+    )
     state["last_probe_ok"] = integrity in ([], ["ok"])

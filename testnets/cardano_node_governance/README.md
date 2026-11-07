@@ -31,6 +31,10 @@ that its body and transaction closure survive a restart, and requires further
 immutable certification after the node reopens. A separate driver provides
 bounded payments using its own funds, keys and journal, including during final
 recovery, so another workload completing cannot leave this check without traffic.
+For this opt-in scenario, `first_setup` prepares and verifies the baseline before
+returning and allowing fault injection or terminal recovery commands to start.
+Failure to prepare it stops setup; recovery never relies on a first baseline
+being captured after faults have already stopped.
 It changes no producer databases, BLS keys, governance parameters or existing
 payment journals. The payment builder is reused with a separate account and
 persistence interface; the existing payment scenario keeps its default behavior.
