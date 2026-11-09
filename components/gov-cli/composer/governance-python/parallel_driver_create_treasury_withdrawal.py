@@ -72,7 +72,9 @@ def _claim_recv_slot(
             if not addr_file.exists():
                 continue
             addr = addr_file.read_text().strip()
-            _tip, _state, pre_balance = treasury.immutable_snapshot(cluster, addr)
+            # This receiver is locked and free: no pending treasury action or
+            # other workload can change its balance within this epoch.
+            pre_balance = treasury.immutable_receiver_balance(cluster, addr)
             if g.claim_recv_slot(i, pre_balance=pre_balance, claimed_epoch=epoch):
                 preparing.enter_context(candidate.pop_all())
                 return i, addr
@@ -100,7 +102,11 @@ def _create(
         recv_idx, recv_addr = _claim_recv_slot(cluster, preparing)
     except Exception as exc:  # noqa: BLE001
         print(f"treasury recipient snapshot unavailable: {exc}", file=sys.stderr)
-        sdk.sometimes(True, "treasury_withdrawal_query_unavailable")
+        sdk.sometimes(
+            True,
+            "treasury_withdrawal_query_unavailable",
+            {"phase": "recipient_baseline", "error": str(exc)},
+        )
         return 0
     if recv_idx is None:
         print("all funds-receiving slots pending, skipping tick", file=sys.stderr)

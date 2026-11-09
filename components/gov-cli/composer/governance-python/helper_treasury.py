@@ -105,6 +105,52 @@ def participation(prop: dict) -> None:
     )
 
 
+def immutable_receiver_balance(cluster: clusterlib.ClusterLib, address: str) -> int:
+    """Read a free recipient's baseline while its receiver lock is held.
+
+    These credentials are never used for withdrawals, delegation or deposit
+    returns. With no pending action for this receiver, the balance is stable
+    within an epoch. Ordinary immutable block progress therefore does not
+    invalidate this single-account read. Settlement still needs the stricter
+    governance-and-balance snapshot below.
+    """
+    for _ in range(3):
+        before = query(cluster, ["tip"], immutable=True)
+        if (
+            not isinstance(before, dict)
+            or type(before.get("epoch")) is not int
+            or type(before.get("slot")) is not int
+            or before["epoch"] < 0
+            or before["slot"] < 0
+            or not isinstance(before.get("hash"), str)
+            or not before["hash"]
+        ):
+            continue
+        accounts = query(cluster, ["stake-address-info", "--address", address], immutable=True)
+        after = query(cluster, ["tip"], immutable=True)
+        if (
+            not isinstance(after, dict)
+            or type(after.get("epoch")) is not int
+            or after.get("epoch") != before["epoch"]
+            or type(after.get("slot")) is not int
+            or after["slot"] < before["slot"]
+            or not isinstance(after.get("hash"), str)
+            or not after["hash"]
+            or (after["slot"] == before["slot"] and after["hash"] != before["hash"])
+        ):
+            continue
+        if not isinstance(accounts, list) or len(accounts) != 1:
+            msg = "recipient is not registered at the immutable point"
+            raise ValueError(msg)
+        balance = accounts[0]["rewardAccountBalance"]
+        if type(balance) is not int or balance < 0:
+            msg = "recipient query did not return a nonnegative integer balance"
+            raise TypeError(msg)
+        return balance
+    msg = "could not acquire an epoch-consistent immutable recipient balance"
+    raise ValueError(msg)
+
+
 def immutable_snapshot(cluster: clusterlib.ClusterLib, address: str) -> tuple[dict, dict, int]:
     """Read governance and reward balance at one confirmed immutable point.
 

@@ -163,6 +163,14 @@ whose ratification result is observed below.
 
 ## `anytime_treasury_withdrawal_enactment.py` — runs continuously, including under faults
 
+Before submitting an action, the creator reads its free recipient's balance at
+the immutable tip under the receiver lock. The two bracketing immutable tips
+must stay in the same epoch and move monotonically; ordinary block advancement
+is allowed. These isolated reward credentials are never used for withdrawals,
+delegation or deposit returns, and a receiver with a pending action cannot be
+claimed. Missing accounts or malformed balances remain unknown. This initial
+single-account baseline does not need a governance snapshot.
+
 Pairs with the creator above. Governance and recipient balance are read at
 the immutable tip, with matching tip hashes before and after the queries.
 An unavailable query, unregistered recipient or advancing snapshot is unknown,

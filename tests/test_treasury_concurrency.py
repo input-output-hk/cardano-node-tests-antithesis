@@ -62,6 +62,7 @@ class TreasuryConcurrency(unittest.TestCase):
             mock.patch.object(
                 treasury, "immutable_snapshot", return_value=(self.tip, self.state, 0)
             ),
+            mock.patch.object(treasury, "immutable_receiver_balance", return_value=0),
             mock.patch.object(checker, "sdk"),
         ]
         for patch in patches:
