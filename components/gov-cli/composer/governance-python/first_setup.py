@@ -37,6 +37,7 @@ import sys
 import time
 
 import helper_gov as g
+import helper_leios_bls as bls
 import helper_leios_storage_setup as storage_setup
 import helper_sdk as sdk
 import helper_treasury as treasury
@@ -319,6 +320,8 @@ def main() -> int:
     g.ensure_dirs()
 
     if g.SETUP_MARKER.exists():
+        if not bls.prepare():
+            return 1
         if not storage_setup.prepare():
             return 1
         sdk.sometimes(True, "governance_setup_already_done")
@@ -381,11 +384,18 @@ def main() -> int:
         return 1
 
     # DRep stake delegation takes effect at the next epoch boundary.
-    try:
+    # Capture the existing target before optional BLS funding waits for
+    # immutability, so crossing a boundary cannot add another whole epoch.
+    start_epoch = None
+    with contextlib.suppress(Exception):
         start_epoch = g.current_epoch(cluster)
+    if not bls.prepare():
+        return 1
+    try:
         # ~50 min/epoch at k=150 (epochLength is 100*k = 15000 slots x
         # 0.2s), so allow > 1 epoch. Not derived from k - revisit if k moves.
-        g.wait_for_epoch(cluster, start_epoch + 1, 5400)
+        if start_epoch is not None:
+            g.wait_for_epoch(cluster, start_epoch + 1, 5400)
     except Exception:  # noqa: BLE001
         pass
 

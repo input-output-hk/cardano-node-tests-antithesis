@@ -557,6 +557,34 @@ After faults stop, polling allows four genesis-derived immutability windows
 (minimum two minutes), using only this scenario's journal and funds. Previously
 recorded recovery cannot end the poll while the latest node probe is unavailable.
 
+## Optional valid BLS registration (pinned Leios only)
+
+Disabled unless `LEIOS_BLS_CHECKS=true` and the generated genesis is Leios.
+The workflow accepts `leios_bls` only with pinned `leios`; disabled drivers emit
+no properties and never create their journal, including on Conway.
+
+| Assertion | Kind | Meaning |
+| --- | --- | --- |
+| `leios_bls_registered_immutable` | Sometimes, mandatory | The private zero-stake pool's expected BLS key was observed in immutable ledger state. Registered before cold-start guards so missing setup cannot silently skip coverage. |
+| `leios_bls_registered_key_matches` | Always | Whenever a well-formed immutable registration is observed, its BLS public key matches the workload's generated key. |
+| `leios_bls_unavailable` | Sometimes, optional | Setup/submission/query was unavailable; this is diagnostic, never a registration witness. |
+| `leios_bls_setup_failed` | Unreachable | Setup could not prepare a privately funded signed transaction before releasing faults. |
+| `leios_bls_submit entered`, `leios_bls_observe entered`, `leios_bls_recovery entered` | Reachable | Enabled driver entry. |
+| `leios_bls_submit_aborted`, `leios_bls_observe_aborted`, `leios_bls_recovery_aborted` | Unreachable | Unexpected driver exception outside the absorbed transient paths. |
+| `leios_bls_submit_exits_zero`, `leios_bls_observe_exits_zero`, `leios_bls_recovery_exits_zero` | Always | Enabled driver wrapper exits normally. |
+
+Funding is made immutable before preparing the registration. Its exact signed
+bytes and expected identity are persisted before any registration submission.
+The registration has no expiry, so delayed terminal submission remains valid.
+There are no delegation or retirement transactions and no extra producing node.
+No volatile acceptance, cached completion flag or query failure counts as an
+immutable registration. Recovery keeps submitting and observing for four
+genesis-derived immutability windows (minimum two minutes), even if the parallel
+driver never ran. Missing evidence still fails the mandatory Sometimes;
+transient failures are not assertions about transaction latency during faults.
+An empty pool query is pending coverage, not a historical disappearance check.
+This scenario does not test invalid proofs, rotation or committee participation.
+
 ## Always vs Sometimes: two different questions, both useful
 
 `always` and `sometimes` aren't a strong/weak pair — they check different
