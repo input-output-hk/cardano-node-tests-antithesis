@@ -25,7 +25,7 @@ def main() -> int:
             time.sleep(timing.POLL_SECONDS)
         observer.main()
         with storage.locked() as state:
-            if state is not None and state.get("recovered") and state.get("last_probe_ok"):
+            if state is not None and storage.recovery_complete(state):
                 return 0
         submitter.main()
     return 0

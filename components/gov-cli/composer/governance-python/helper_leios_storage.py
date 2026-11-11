@@ -25,7 +25,12 @@ STATE = ROOT / "tracking.json"
 NODE = pathlib.Path("/leios-storage")
 DB = NODE / "leios.db"
 SOCKET = NODE / "node.socket"
-COVERAGE = ("leios_storage_baseline", "leios_storage_restart_observed", "leios_storage_recovered")
+COVERAGE = (
+    "leios_storage_baseline",
+    "leios_storage_restart_observed",
+    "leios_storage_recovered",
+    "leios_storage_recovered_payment",
+)
 
 
 def enabled() -> bool:
@@ -170,11 +175,62 @@ def assess(
             return
 
 
+def payment_candidate(state: dict, tip: dict) -> dict | None:
+    """Use only this scenario's payments and certificates at this node's immutable tip."""
+    saved = state.get("payment")
+    if saved:
+        # This recipient is never spent from. A payment already observed at an
+        # immutable point remains an obligation after restarting and catching up.
+        return saved if tip["slot"] >= saved["cert_slot"] else None
+    trace = state["trace"]
+    ancestors = traces.immutable_ancestors(trace, tip["hash"])
+    for payment in state.get("traffic", {}).get("payments", []):
+        proof = traces.certified_payment(trace, payment, ancestors)
+        if proof:
+            slot = trace["certificates"][proof["certifying_rb"]]
+            return {
+                **payment,
+                "proof": {**proof, "cert_slot": slot},
+                "cert_slot": slot,
+            }
+    return None
+
+
+def assess_payment(state: dict, payment: dict, tip: dict, utxos: dict) -> None:
+    """Check a known certified payment only after the caller validates the read point."""
+    output = utxos.get(f"{payment['txid']}#0")
+    matches = (
+        isinstance(output, dict)
+        and output.get("address") == payment["recipient"]
+        and output.get("value") == {"lovelace": payment["amount"]}
+    )
+    details = {"txid": payment["txid"], "immutable_hash": tip["hash"], **payment["proof"]}
+    sdk.always(matches, "leios_storage_payment_matches", details)
+    state["last_payment_ok"] = matches
+    if matches:
+        state["payment"] = payment
+    if state.get("recovered"):
+        sdk.sometimes(matches, "leios_storage_recovered_payment", details)
+
+
+def recovery_complete(state: dict) -> bool:
+    return bool(
+        state.get("recovered") and state.get("last_probe_ok") and state.get("last_payment_ok")
+    )
+
+
 def observe(state: dict) -> None:
     state["last_probe_ok"] = False
+    state["last_payment_ok"] = False
     # Unlike fresh owned payments, storage can use already-immutable history.
     trace = state.setdefault("trace", {"tracking_started": True})
-    traces.ingest(trace)
+    # Reuse the trace parser with our own payment records, never the payment
+    # workload's journal. Do not persist a second copy of this bounded list.
+    trace["payments"] = state.get("traffic", {}).get("payments", [])
+    try:
+        traces.ingest(trace)
+    finally:
+        trace.pop("payments", None)
     cluster = clusterlib.ClusterLib(
         state_dir=g.GOV_STATE_DIR, socket_path=SOCKET, command_era="dijkstra"
     )
@@ -187,6 +243,9 @@ def observe(state: dict) -> None:
     baseline = state.get("baseline")
     if baseline:
         proofs = [*proofs, baseline["proof"]]
+    payment = payment_candidate(state, tip)
+    if payment:
+        proofs = [*proofs, payment["proof"]]
     try:
         snapshots, integrity = read_snapshot(proofs, baseline is None or socket != state["socket"])
     except sqlite3.DatabaseError as exc:
@@ -196,10 +255,23 @@ def observe(state: dict) -> None:
         ):
             raise
         snapshots, integrity = {}, [str(exc)]
+    utxos = None
+    if payment and snapshots.get(payment["proof"]["eb_hash"]):
+        utxos = json.loads(
+            cluster.g_query.query_cli(
+                ["utxo", "--tx-in", f"{payment['txid']}#0", "--output-json"],
+                cli_sub_args=["--immutable-tip"],
+            )
+        )
+        if not isinstance(utxos, dict):
+            msg = "unknown storage-node immutable UTxO response"
+            raise TypeError(msg)
     after = json.loads(cluster.g_query.query_cli(["tip"], cli_sub_args=["--immutable-tip"]))
     if tip["hash"] != after["hash"] or socket != identity(SOCKET) or database != identity(DB)[:2]:
         return
     assess(state, tip, head, socket, proofs, snapshots, integrity)
+    if payment and utxos is not None and integrity in ([], ["ok"]):
+        assess_payment(state, payment, tip, utxos)
     sdk.sometimes(
         True,
         "leios_storage_observation",
@@ -210,6 +282,7 @@ def observe(state: dict) -> None:
             "baseline": state.get("baseline"),
             "restart_slot": state.get("restart_slot"),
             "recovered": state.get("recovered", False),
+            "payment_verified": state["last_payment_ok"],
         },
         must_hit=False,
     )

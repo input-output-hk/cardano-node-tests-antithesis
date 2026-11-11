@@ -31,6 +31,10 @@ that its body and transaction closure survive a restart, and requires further
 immutable certification after the node reopens. A separate driver provides
 bounded payments using its own funds, keys and journal, including during final
 recovery, so another workload completing cannot leave this check without traffic.
+The checker also follows its own certified payment into the recovered node's
+immutable UTxO set and verifies the output's address and amount. This checks
+ledger recovery as well as retained SQLite bytes, using the same node, private
+funds and journal. The regular relay's ledger is not used as recovery evidence.
 For this opt-in scenario, `first_setup` prepares and verifies the baseline before
 returning and allowing fault injection or terminal recovery commands to start.
 Failure to prepare it stops setup; recovery never relies on a first baseline

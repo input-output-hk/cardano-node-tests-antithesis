@@ -31,7 +31,7 @@ def main() -> int:
     if not g.SETUP_MARKER.exists():
         return 0
     with storage.locked() as state:
-        if state is None or state.get("recovered"):
+        if state is None or storage.recovery_complete(state):
             return 0
         try:
             supply(state)

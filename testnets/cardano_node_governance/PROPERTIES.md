@@ -532,6 +532,8 @@ budget as recovery. It does not rely on another workload having run.
 | `leios_storage_baseline` | Sometimes | a nonempty immutable certified EB body and complete closure were read and verified |
 | `leios_storage_restart_observed` | Sometimes | the node socket was recreated after the baseline was recorded |
 | `leios_storage_recovered` | Sometimes | after a restart, the baseline still matches and a further complete immutable certified EB lies beyond both the last observed pre-restart head and the first post-restart head |
+| `leios_storage_payment_matches` | Always | A private storage-workload payment tied to an immutable certified EB with a complete stored closure has its expected unspent output in the storage node's own immutable ledger. |
+| `leios_storage_recovered_payment` | Sometimes | After storage recovery, a fresh immutable query on that recovered node confirms the private certified payment's expected output. |
 | `leios_storage_integrity` | Always | a stable SQLite snapshot passes `quick_check`, checked at baseline acquisition and after reopening; a stable corrupt/not-a-database read also fails this invariant |
 | `leios_storage_certified_eb_preserved` | Always | once the node catches up to the baseline's certifying slot, its EB body and complete closure still match the original fingerprint |
 | `leios_storage_query_unavailable` | Sometimes, optional | a fault interrupted a query or file read; this supplies no recovery evidence |
@@ -556,6 +558,17 @@ preservation and continued validation, not that this node cast fresh votes.
 After faults stop, polling allows four genesis-derived immutability windows
 (minimum two minutes), using only this scenario's journal and funds. Previously
 recorded recovery cannot end the poll while the latest node probe is unavailable.
+
+Recovery also checks ledger application on the fault target, rather than using
+the regular relay's UTxO view as its evidence. Only this scenario's private
+payments qualify, with a producer-trace certificate on the target's immutable
+chain and a complete SQLite closure. The immutable tip, socket identity and DB
+identity must remain stable around the database and UTxO reads. An output once
+confirmed immutable is retained as an obligation across restarts; its private
+recipient is never spent from. An empty successful UTxO result after such proof
+fails the payment invariant; unavailable queries and incomplete evidence remain
+unknown. Traffic and terminal observation continue until both storage and a
+fresh ledger check succeed. Setup's existing baseline requirement is unchanged.
 
 ## Optional valid BLS registration (pinned Leios only)
 
