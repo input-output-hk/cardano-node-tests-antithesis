@@ -53,6 +53,33 @@ to be observed; a run that never exercises them fails coverage. It currently
 supports the pinned prototype's `ebs` / `ebTxs` / `txs` schema only, not upstream's
 new split volatile/immutable databases. No image upgrade is included.
 
+## Optional valid BLS pool registration
+
+The workflow's `leios_bls` checkbox defaults **off** and accepts only pinned
+`leios` mode. Conway (including scheduled runs), `leios-latest`, and default
+Leios runs do not enable it. It can be combined with `leios_storage`.
+
+Before faults, setup creates private payment, stake-owner, cold, VRF and BLS
+credentials and funds a signed registration transaction. During faults the
+drivers rebroadcast those exact bytes without an expiry tied to campaign
+duration; recovery also submits if the parallel
+driver never ran. An immutable ledger query must eventually show the expected
+BLS public key. Every successful registered-pool observation checks that key.
+
+This adds one zero-pledge pool with no delegation, relays or running node. It
+does not replace any producer or change protocol parameters. Its credentials,
+funds and locked journal live under `/gov-data/leios_bls/`, independently of
+the other workloads. Pool cost covers both values in the existing parameter
+workload's allowlist. No CLI, clusterlib or node dependency is changed.
+
+This covers valid registration under faults and checks the key whenever that
+registration is observed; it does
+not claim committee activation, key rotation, or invalid proof rejection.
+Local capability testing found that the pinned prototype accepts a mismatched
+proof, so that unsupported rejection assertion is deliberately not included.
+`scripts/enable-leios-bls.sh` flattens the optional overlay into the run's
+single Compose file after pinned Leios mode selection.
+
 ## Leios load (`tx-firehose`)
 
 Leios's endorser blocks only certify transactions that are already in

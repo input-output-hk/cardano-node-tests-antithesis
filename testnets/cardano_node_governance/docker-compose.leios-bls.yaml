@@ -1,0 +1,5 @@
+# Opt-in checker only; the private registered pool has no stake or node.
+services:
+  gov-cli:
+    environment:
+      LEIOS_BLS_CHECKS: "true"
