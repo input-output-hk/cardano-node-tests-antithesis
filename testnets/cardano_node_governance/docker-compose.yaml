@@ -1,37 +1,457 @@
-# cardano_node_governance — Conway governance workload under fault
-# injection.
-#
-# Topology:
-#   p1, p2, p3  block producers (cardano-node 11.0.1), UNDER fault
-#               injection. 3 producers so a network partition leaves a
-#               2-vs-1 majority that anchors the canonical chain (keeps
-#               reorg depth < k); k is also raised in the genesis.
-#   relay1   relay, EXCLUDED from faults (stable query/submit endpoint)
-#   gov-cli  sleeping cardano-cli container; Antithesis docker-execs the
-#            governance composer drivers (create-action / vote) against
-#            relay1, each cardano-cli operation a separate driver
-#
-# Genesis + governance assets (committee seeded in the Conway genesis,
-# DRep / vote-stake / CC keys + certs) are produced by gov-configurator
-# using cardonnay's local_fast generator. The on-chain governance
-# operations are performed by the gov-cli drivers in a setup phase
-# (first_) plus parallel create/vote drivers.
-
-x-cardano-node: &cardano-node
-  # NODE_IMAGE overrides for an opt-in Leios/Dijkstra node - normally our
-  # own self-built ghcr.io/saratomaz/.../cardano-node-leios (see
-  # scripts/build-leios-node-image.sh), or the third-party
-  # ghcr.io/input-output-hk/ouroboros-leios/cardano-node-leios:latest for
-  # leios-latest mode. The embedded default digest is what CI's "Pin
-  # fetched image" step rewrites on every run for the default
-  # Praos/Conway mode.
-  # NODE_EXTRA_ARGS (used in command: below) carries the extra CLI flags
-  # a Leios node needs beyond Praos - currently just
-  # "--shelley-bls-key /configs/keys/bls.skey" - empty/unset for Conway.
-  image: ${NODE_IMAGE:-ghcr.io/intersectmbo/cardano-node@sha256:007da778998d0bdb043fb834c62b9da1c95e33610f31f6f9cccab29a945e2b99}
-  environment:
-    CARDANO_BLOCK_PRODUCER: true
-  command: >
+name: cardano_node_governance
+services:
+  gov-cli:
+    container_name: gov-cli
+    depends_on:
+      gov-configurator:
+        condition: service_completed_successfully
+        required: true
+      relay1:
+        condition: service_started
+        required: true
+    environment:
+      CARDANO_NODE_SOCKET_PATH: /state/node.socket
+      GOV: /gov-data
+      GOV_COMMAND_ERA: dijkstra
+      GOV_STATE_DIR: /gov-state
+      LEIOS_BLS_CHECKS: "true"
+      NUM_CC: "5"
+      NUM_DREPS: "5"
+      NUM_PAYMENT_ADDRS: "20"
+      NUM_POOLS: "3"
+      TESTNET_MAGIC: "42"
+      WORK: /work
+    hostname: gov-cli.example
+    image: ghcr.io/saratomaz/cardano-node-tests-antithesis/gov-cli@sha256:531fceadf0077c191032ca960f3787a699ad897da273f9ffe89f5f796d3f638e
+    labels:
+      com.antithesis.exclude_from_faults: network,kill,pause,stop
+    networks:
+      default: null
+    restart: always
+    tmpfs:
+      - /work
+    volumes:
+      - type: volume
+        source: relay1-state
+        target: /state
+        read_only: true
+        volume: {}
+      - type: volume
+        source: gov-data
+        target: /gov-data
+        volume: {}
+      - type: volume
+        source: gov-state
+        target: /gov-state
+        volume: {}
+      - type: volume
+        source: tracer
+        target: /tracer
+        read_only: true
+        volume: {}
+  gov-configurator:
+    container_name: gov-configurator
+    environment:
+      NETWORK_MAGIC: "42"
+      NUM_CC: "5"
+      NUM_DREPS: "5"
+      NUM_POOLS: "3"
+      PROTOCOL_VERSION: "12"
+      SECURITY_PARAM: "150"
+    image: ghcr.io/saratomaz/cardano-node-tests-antithesis/gov-configurator@sha256:e97d312c4444be31c97ba4801ee563a27a20df1bcd0de8d9a45a20f92bc8d633
+    networks:
+      default: null
+    volumes:
+      - type: volume
+        source: p1-configs
+        target: /configs/1
+        volume: {}
+      - type: volume
+        source: p2-configs
+        target: /configs/2
+        volume: {}
+      - type: volume
+        source: p3-configs
+        target: /configs/3
+        volume: {}
+      - type: volume
+        source: gov-data
+        target: /gov-data
+        volume: {}
+      - type: volume
+        source: gov-state
+        target: /gov-state
+        volume: {}
+  log-tailer:
+    container_name: log-tailer
+    depends_on:
+      tracer:
+        condition: service_started
+        required: true
+    hostname: log-tailer.example
+    image: ghcr.io/cardano-foundation/cardano-node-antithesis/log-tailer@sha256:a5d23c42408a1003bb14208fd97dd2bdda102e7002e4e2a2804e71a80df56484
+    networks:
+      default: null
+    restart: always
+    volumes:
+      - type: volume
+        source: tracer
+        target: /tracer
+        read_only: true
+        volume: {}
+  p1:
+    command:
+      - run
+      - --topology
+      - /configs/configs/topology.json
+      - --config
+      - /configs/configs/config.json
+      - --database-path
+      - /state
+      - --socket-path
+      - /state/node.socket
+      - --tracer-socket-path-connect
+      - /tracer/tracer.socket
+      - --shelley-operational-certificate
+      - /configs/keys/opcert.cert
+      - --shelley-kes-key
+      - /configs/keys/kes.skey
+      - --shelley-vrf-key
+      - /configs/keys/vrf.skey
+      - --port
+      - "3001"
+      - --host-addr
+      - 0.0.0.0
+      - --shelley-bls-key
+      - /configs/keys/bls.skey
+      - +RTS
+      - -N
+      - -A16m
+      - -qg
+      - -qb
+      - -RTS
+    container_name: p1
+    depends_on:
+      gov-configurator:
+        condition: service_completed_successfully
+        required: true
+      tracer-sidecar:
+        condition: service_started
+        required: true
+    environment:
+      CARDANO_BLOCK_PRODUCER: "true"
+    hostname: p1.example
+    image: ghcr.io/saratomaz/cardano-node-tests-antithesis/cardano-node-leios@sha256:eb65cee8ef35cb76e4532704eec565a1628617d446bbb8a91ffca61e0d17dad5
+    networks:
+      default: null
+    restart: always
+    volumes:
+      - type: volume
+        source: p1-configs
+        target: /configs
+        read_only: true
+        volume: {}
+      - type: volume
+        source: tracer
+        target: /tracer
+        volume: {}
+  p2:
+    command:
+      - run
+      - --topology
+      - /configs/configs/topology.json
+      - --config
+      - /configs/configs/config.json
+      - --database-path
+      - /state
+      - --socket-path
+      - /state/node.socket
+      - --tracer-socket-path-connect
+      - /tracer/tracer.socket
+      - --shelley-operational-certificate
+      - /configs/keys/opcert.cert
+      - --shelley-kes-key
+      - /configs/keys/kes.skey
+      - --shelley-vrf-key
+      - /configs/keys/vrf.skey
+      - --port
+      - "3001"
+      - --host-addr
+      - 0.0.0.0
+      - --shelley-bls-key
+      - /configs/keys/bls.skey
+      - +RTS
+      - -N
+      - -A16m
+      - -qg
+      - -qb
+      - -RTS
+    container_name: p2
+    depends_on:
+      gov-configurator:
+        condition: service_completed_successfully
+        required: true
+      tracer-sidecar:
+        condition: service_started
+        required: true
+    environment:
+      CARDANO_BLOCK_PRODUCER: "true"
+    hostname: p2.example
+    image: ghcr.io/saratomaz/cardano-node-tests-antithesis/cardano-node-leios@sha256:eb65cee8ef35cb76e4532704eec565a1628617d446bbb8a91ffca61e0d17dad5
+    networks:
+      default: null
+    restart: always
+    volumes:
+      - type: volume
+        source: p2-configs
+        target: /configs
+        read_only: true
+        volume: {}
+      - type: volume
+        source: tracer
+        target: /tracer
+        volume: {}
+  p3:
+    command:
+      - run
+      - --topology
+      - /configs/configs/topology.json
+      - --config
+      - /configs/configs/config.json
+      - --database-path
+      - /state
+      - --socket-path
+      - /state/node.socket
+      - --tracer-socket-path-connect
+      - /tracer/tracer.socket
+      - --shelley-operational-certificate
+      - /configs/keys/opcert.cert
+      - --shelley-kes-key
+      - /configs/keys/kes.skey
+      - --shelley-vrf-key
+      - /configs/keys/vrf.skey
+      - --port
+      - "3001"
+      - --host-addr
+      - 0.0.0.0
+      - --shelley-bls-key
+      - /configs/keys/bls.skey
+      - +RTS
+      - -N
+      - -A16m
+      - -qg
+      - -qb
+      - -RTS
+    container_name: p3
+    depends_on:
+      gov-configurator:
+        condition: service_completed_successfully
+        required: true
+      tracer-sidecar:
+        condition: service_started
+        required: true
+    environment:
+      CARDANO_BLOCK_PRODUCER: "true"
+    hostname: p3.example
+    image: ghcr.io/saratomaz/cardano-node-tests-antithesis/cardano-node-leios@sha256:eb65cee8ef35cb76e4532704eec565a1628617d446bbb8a91ffca61e0d17dad5
+    networks:
+      default: null
+    restart: always
+    volumes:
+      - type: volume
+        source: p3-configs
+        target: /configs
+        read_only: true
+        volume: {}
+      - type: volume
+        source: tracer
+        target: /tracer
+        volume: {}
+  relay1:
+    command:
+      - run
+      - --topology
+      - /configs/configs/topology.json
+      - --config
+      - /configs/configs/config.json
+      - --database-path
+      - /state
+      - --socket-path
+      - /state/node.socket
+      - --tracer-socket-path-connect
+      - /tracer/tracer.socket
+      - --port
+      - "3001"
+      - --host-addr
+      - 0.0.0.0
+      - +RTS
+      - -N
+      - -A16m
+      - -qg
+      - -qb
+      - -RTS
+    container_name: relay1
+    depends_on:
+      gov-configurator:
+        condition: service_completed_successfully
+        required: true
+      tracer-sidecar:
+        condition: service_started
+        required: true
+    environment:
+      CARDANO_BLOCK_PRODUCER: "false"
+    hostname: relay1.example
+    image: ghcr.io/saratomaz/cardano-node-tests-antithesis/cardano-node-leios@sha256:eb65cee8ef35cb76e4532704eec565a1628617d446bbb8a91ffca61e0d17dad5
+    labels:
+      com.antithesis.exclude_from_faults: network,kill,pause,stop
+    networks:
+      default: null
+    restart: always
+    volumes:
+      - type: volume
+        source: p1-configs
+        target: /configs
+        read_only: true
+        volume: {}
+      - type: bind
+        source: ./relay-topology.json
+        target: /configs/configs/topology.json
+        read_only: true
+        bind: {}
+      - type: volume
+        source: relay1-state
+        target: /state
+        volume: {}
+      - type: volume
+        source: tracer
+        target: /tracer
+        volume: {}
+  sidecar:
+    container_name: sidecar
+    depends_on:
+      tracer-sidecar:
+        condition: service_started
+        required: true
+    environment:
+      NETWORKMAGIC: "42"
+      POOLS: "3"
+      PORT: "3001"
+    hostname: sidecar.example
+    image: ghcr.io/cardano-foundation/cardano-node-antithesis/sidecar:1ff6913
+    labels:
+      com.antithesis.exclude_from_faults: network,kill,pause,stop
+    networks:
+      default: null
+    restart: always
+    tmpfs:
+      - /tmp
+  tracer:
+    command:
+      - --config
+      - /tracer-config.yaml
+    container_name: tracer
+    entrypoint:
+      - cardano-tracer
+    hostname: tracer.example
+    image: ghcr.io/intersectmbo/cardano-tracer@sha256:da628263a851b419c38d020d3a7dc3b65b20ee84e730faeb74babd6d96f28efe
+    labels:
+      com.antithesis.exclude_from_faults: network,kill,pause,stop
+    networks:
+      default: null
+    restart: always
+    volumes:
+      - type: volume
+        source: tracer
+        target: /opt/cardano-tracer
+        volume: {}
+      - type: bind
+        source: ./tracer-config-leios.yaml
+        target: /tracer-config.yaml
+        read_only: true
+        bind: {}
+  tracer-sidecar:
+    command:
+      - /opt/cardano-tracer/logs
+    container_name: tracer-sidecar
+    depends_on:
+      tracer:
+        condition: service_started
+        required: true
+    environment:
+      CHAINPOINT_FILEPATH: /opt/cardano-tracer/chainPoints.log
+      POOLS: "3"
+    hostname: tracer-sidecar.example
+    image: ghcr.io/cardano-foundation/cardano-node-antithesis/tracer-sidecar:5271661
+    labels:
+      com.antithesis.exclude_from_faults: network,kill,pause,stop
+    networks:
+      default: null
+    restart: always
+    volumes:
+      - type: volume
+        source: tracer
+        target: /opt/cardano-tracer
+        volume: {}
+  tx-firehose:
+    container_name: tx-firehose
+    depends_on:
+      gov-configurator:
+        condition: service_completed_successfully
+        required: true
+      relay1:
+        condition: service_started
+        required: true
+    environment:
+      CARDANO_NODE_SOCKET_PATH: /state/node.socket
+      GOV: /gov-data
+      GOV_STATE_DIR: /gov-state
+      TESTNET_MAGIC: "42"
+      TX_FIREHOSE: ""
+      TX_TPS: "15"
+    hostname: tx-firehose.example
+    image: ghcr.io/saratomaz/cardano-node-tests-antithesis/tx-firehose@sha256:26deb2561ae0a5a660cc8509a17d7bb81eeaed7111bcb8d12e13e4ed19c5c457
+    labels:
+      com.antithesis.exclude_from_faults: network,kill,pause,stop
+    networks:
+      default: null
+    restart: always
+    volumes:
+      - type: volume
+        source: relay1-state
+        target: /state
+        read_only: true
+        volume: {}
+      - type: volume
+        source: gov-data
+        target: /gov-data
+        read_only: true
+        volume: {}
+      - type: volume
+        source: gov-state
+        target: /gov-state
+        read_only: true
+        volume: {}
+networks:
+  default:
+    name: cardano-node-testnet
+    driver: bridge
+volumes:
+  gov-data:
+    name: cardano_node_governance_gov-data
+  gov-state:
+    name: cardano_node_governance_gov-state
+  p1-configs:
+    name: cardano_node_governance_p1-configs
+  p2-configs:
+    name: cardano_node_governance_p2-configs
+  p3-configs:
+    name: cardano_node_governance_p3-configs
+  relay1-state:
+    name: cardano_node_governance_relay1-state
+  tracer:
+    name: cardano_node_governance_tracer
+x-cardano-node:
+  command: |
     run --topology /configs/configs/topology.json
       --config /configs/configs/config.json
       --database-path /state
@@ -42,261 +462,14 @@ x-cardano-node: &cardano-node
       --shelley-vrf-key /configs/keys/vrf.skey
       --port 3001
       --host-addr 0.0.0.0
-      ${NODE_EXTRA_ARGS:-}
+      --shelley-bls-key /configs/keys/bls.skey
       +RTS -N -A16m -qg -qb -RTS
-  restart: always
   depends_on:
     gov-configurator:
       condition: service_completed_successfully
     tracer-sidecar:
       condition: service_started
-
-services:
-  # One-shot: cardonnay genesis + governance assets -> volumes.
-  gov-configurator:
-    image: ghcr.io/saratomaz/cardano-node-tests-antithesis/gov-configurator@sha256:e97d312c4444be31c97ba4801ee563a27a20df1bcd0de8d9a45a20f92bc8d633
-    container_name: gov-configurator
-    environment:
-      NUM_POOLS: "3"
-      NUM_DREPS: "5"
-      NUM_CC: "5"
-      NETWORK_MAGIC: "42"
-      # 12 triggers the Dijkstra hard-fork for an opt-in Leios run (pair
-      # with NODE_IMAGE/GOV_COMMAND_ERA below).
-      PROTOCOL_VERSION: ${PROTOCOL_VERSION:-10}
-      # 3 producers (2-vs-1 majority under partition) + larger k so the
-      # minority's reorg over a multi-minute split stays < k. Sized from
-      # observed restart cadence (~60-150s) against this genesis's
-      # activeSlotsCoeff=0.1 (~0.5 blocks/s network-wide): a 150s outage
-      # produces ~75 blocks elsewhere, so k must clear that with margin.
-      # The only place k is written; generate.sh requires it and derives
-      # epochLength as 100·k (10·k/f, f=0.1), which keeps the
-      # nonce-stability window inside an epoch.
-      SECURITY_PARAM: "150"
-    volumes:
-      - p1-configs:/configs/1
-      - p2-configs:/configs/2
-      - p3-configs:/configs/3
-      - gov-data:/gov-data
-      - gov-state:/gov-state
-
-  tracer:
-    image: ghcr.io/intersectmbo/cardano-tracer@sha256:da628263a851b419c38d020d3a7dc3b65b20ee84e730faeb74babd6d96f28efe
-    hostname: tracer.example
-    container_name: tracer
-    labels:
-      com.antithesis.exclude_from_faults: "network,kill,pause,stop"
-    volumes:
-      - tracer:/opt/cardano-tracer
-      - ./tracer-config.yaml:/tracer-config.yaml:ro
-    entrypoint: cardano-tracer
-    command:
-      - "--config"
-      - "/tracer-config.yaml"
-    restart: always
-
-  p1:
-    <<: *cardano-node
-    container_name: p1
-    hostname: p1.example
-    volumes:
-      - p1-configs:/configs:ro
-      - tracer:/tracer
-
-  p2:
-    <<: *cardano-node
-    container_name: p2
-    hostname: p2.example
-    volumes:
-      - p2-configs:/configs:ro
-      - tracer:/tracer
-
-  p3:
-    <<: *cardano-node
-    container_name: p3
-    hostname: p3.example
-    volumes:
-      - p3-configs:/configs:ro
-      - tracer:/tracer
-
-  relay1:
-    # Same NODE_IMAGE override as the &cardano-node anchor above -
-    # relay1 has its own image line since it doesn't use that anchor.
-    image: ${NODE_IMAGE:-ghcr.io/intersectmbo/cardano-node@sha256:007da778998d0bdb043fb834c62b9da1c95e33610f31f6f9cccab29a945e2b99}
-    container_name: relay1
-    hostname: relay1.example
-    labels:
-      com.antithesis.exclude_from_faults: "network,kill,pause,stop"
-    environment:
-      CARDANO_BLOCK_PRODUCER: false
-    command: >
-      run --topology /configs/configs/topology.json
-        --config /configs/configs/config.json
-        --database-path /state
-        --socket-path /state/node.socket
-        --tracer-socket-path-connect /tracer/tracer.socket
-        --port 3001
-        --host-addr 0.0.0.0
-        +RTS -N -A16m -qg -qb -RTS
-    restart: always
-    volumes:
-      - p1-configs:/configs:ro
-      - ./relay-topology.json:/configs/configs/topology.json:ro
-      - relay1-state:/state
-      - tracer:/tracer
-    depends_on:
-      gov-configurator:
-        condition: service_completed_successfully
-      tracer-sidecar:
-        condition: service_started
-
-  # Sleeping cardano-cli container holding the governance composer
-  # drivers.
-  gov-cli:
-    image: ghcr.io/saratomaz/cardano-node-tests-antithesis/gov-cli@sha256:531fceadf0077c191032ca960f3787a699ad897da273f9ffe89f5f796d3f638e
-    container_name: gov-cli
-    hostname: gov-cli.example
-    labels:
-      com.antithesis.exclude_from_faults: "network,kill,pause,stop"
-    environment:
-      CARDANO_NODE_SOCKET_PATH: /state/node.socket
-      TESTNET_MAGIC: "42"
-      GOV: /gov-data
-      GOV_STATE_DIR: /gov-state
-      WORK: /work
-      # "dijkstra" for an opt-in Leios run (pair with gov-configurator's
-      # PROTOCOL_VERSION and NODE_IMAGE above).
-      GOV_COMMAND_ERA: ${GOV_COMMAND_ERA:-conway}
-      NUM_DREPS: "5"
-      NUM_CC: "5"
-      NUM_POOLS: "3"
-      NUM_PAYMENT_ADDRS: "20"
-    volumes:
-      - relay1-state:/state:ro
-      - gov-data:/gov-data
-      - gov-state:/gov-state
-      # Read-only Leios endorser-block coverage probe; inert in Conway.
-      - tracer:/tracer:ro
-    tmpfs:
-      - /work
-    restart: always
-    depends_on:
-      relay1:
-        condition: service_started
-      gov-configurator:
-        condition: service_completed_successfully
-
-  # Leios load generator.
-  #
-  # Its own image, NOT gov-cli's. Reusing gov-cli's image put
-  # /opt/antithesis/test/v1/governance in this container too, and
-  # Antithesis discovers test commands per container - so it scheduled
-  # the governance drivers here as well, where they hit the read-only
-  # /gov-data below and aborted. That failed run 37252534099 in Conway,
-  # and would have failed Leios identically: the gate below controls
-  # whether the generator submits, not which containers run drivers.
-  #
-  # Leios endorser blocks only certify transactions that are actually in
-  # the mempool, and the governance drivers submit ~one tx per composer
-  # tick. Without this, a Leios run only proves the node boots.
-  # /entrypoint.sh follows the generated genesis: it submits only when
-  # protocolVersion.major >= 12 and idles in Conway, so there is no
-  # second switch that could disagree with PROTOCOL_VERSION above.
-  tx-firehose:
-    image: ghcr.io/saratomaz/cardano-node-tests-antithesis/tx-firehose@sha256:26deb2561ae0a5a660cc8509a17d7bb81eeaed7111bcb8d12e13e4ed19c5c457
-    container_name: tx-firehose
-    hostname: tx-firehose.example
-    # Load must be a stable backdrop, not a fault target: if this could
-    # be paused or killed, an EB-certification failure under a network
-    # fault would be indistinguishable from "the load stopped".
-    labels:
-      com.antithesis.exclude_from_faults: "network,kill,pause,stop"
-    environment:
-      CARDANO_NODE_SOCKET_PATH: /state/node.socket
-      TESTNET_MAGIC: "42"
-      GOV: /gov-data
-      GOV_STATE_DIR: /gov-state
-      # Upstream's Leios rate (cardano-node-tests runner/env_leios). A
-      # plain literal, not a ${...}: the workflow's leios-patch sed only
-      # knows about the placeholders it already rewrites.
-      TX_TPS: "15"
-      # Escape hatch for triaging a suspected load-caused failure.
-      # Unset - which is what moog runs, since it passes no env - means
-      # "follow the genesis", so this is not a second gate of record.
-      # Needs the passthrough: compose does not forward host env vars
-      # that a service doesn't list.
-      TX_FIREHOSE: ${TX_FIREHOSE:-}
-    volumes:
-      - relay1-state:/state:ro
-      # Both read-only: it only reads its own signing key and the
-      # genesis, so it structurally cannot touch faucet.lock, the
-      # payment-address pool or the treasury claim slots.
-      - gov-data:/gov-data:ro
-      - gov-state:/gov-state:ro
-    restart: always
-    depends_on:
-      relay1:
-        condition: service_started
-      gov-configurator:
-        condition: service_completed_successfully
-
-  sidecar:
-    image: ghcr.io/cardano-foundation/cardano-node-antithesis/sidecar:1ff6913
-    environment:
-      NETWORKMAGIC: 42
-      PORT: 3001
-      POOLS: "3"
-    container_name: sidecar
-    hostname: sidecar.example
-    labels:
-      com.antithesis.exclude_from_faults: "network,kill,pause,stop"
-    depends_on:
-      tracer-sidecar:
-        condition: service_started
-    restart: always
-    tmpfs:
-      - /tmp
-
-  tracer-sidecar:
-    image: ghcr.io/cardano-foundation/cardano-node-antithesis/tracer-sidecar:5271661
-    container_name: tracer-sidecar
-    hostname: tracer-sidecar.example
-    labels:
-      com.antithesis.exclude_from_faults: "network,kill,pause,stop"
-    command:
-      - "/opt/cardano-tracer/logs"
-    environment:
-      POOLS: "3"
-      CHAINPOINT_FILEPATH: "/opt/cardano-tracer/chainPoints.log"
-    volumes:
-      - tracer:/opt/cardano-tracer
-    restart: always
-    depends_on:
-      tracer:
-        condition: service_started
-
-  log-tailer:
-    image: ghcr.io/cardano-foundation/cardano-node-antithesis/log-tailer@sha256:a5d23c42408a1003bb14208fd97dd2bdda102e7002e4e2a2804e71a80df56484
-    container_name: log-tailer
-    hostname: log-tailer.example
-    volumes:
-      - tracer:/tracer:ro
-    restart: always
-    depends_on:
-      tracer:
-        condition: service_started
-
-volumes:
-  tracer:
-  p1-configs:
-  p2-configs:
-  p3-configs:
-  relay1-state:
-  gov-data:
-  gov-state:
-
-networks:
-  default:
-    name: cardano-node-testnet
-    driver: bridge
-    internal: ${INTERNAL_NETWORK}
+  environment:
+    CARDANO_BLOCK_PRODUCER: true
+  image: ghcr.io/saratomaz/cardano-node-tests-antithesis/cardano-node-leios@sha256:eb65cee8ef35cb76e4532704eec565a1628617d446bbb8a91ffca61e0d17dad5
+  restart: always
