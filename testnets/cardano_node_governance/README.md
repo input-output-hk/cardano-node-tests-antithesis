@@ -84,6 +84,34 @@ proof, so that unsupported rejection assertion is deliberately not included.
 `scripts/enable-leios-bls.sh` flattens the optional overlay into the run's
 single Compose file after pinned Leios mode selection.
 
+## Optional certified Plutus spends
+
+The workflow's `leios_plutus` checkbox defaults **off** and accepts only pinned
+`leios`. Conway, scheduled runs, `leios-latest`, and ordinary Leios runs do not
+enable it. Start validation with this option alone; it can also be composed with
+the storage and BLS options without changing producer configuration.
+
+This workload adds valid Plutus V3 spends to the transactions competing for
+certified EBs. It checks that an immutable certified transaction consumes its
+script input, creates exactly the expected recipient output, and leaves its
+collateral untouched. An ordinary RB payment or mempool acceptance cannot satisfy
+its required coverage. This extends existing key-payment tracking to the script
+validation and collateral path under faults.
+
+Setup prepares private immutable inputs and collateral before releasing faults.
+The submitter journals batches of independently spendable transactions before
+broadcast; final recovery continues both submission and observation even if the
+parallel driver never ran. Script inputs, collateral, recipient, funds, and the
+locked journal under `/gov-data/leios_plutus/` belong only to this workload.
+Collateral has a separate address and is never used as an ordinary funding source.
+
+The basic always-succeed script uses the existing V3 cost model. The pinned
+configuration has no V2 cost model, so this deliberately uses V3 without changing
+genesis, protocol parameters, dependencies, or existing workloads. It does not
+test new Plutus builtins, reference scripts, invalid-script rejection, or budget
+limits. `scripts/enable-leios-plutus.sh` materializes only the optional checker
+flag into the run's single Compose file.
+
 ## Leios load (`tx-firehose`)
 
 Leios's endorser blocks only certify transactions that are already in

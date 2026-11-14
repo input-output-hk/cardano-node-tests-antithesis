@@ -1,0 +1,5 @@
+# Opt-in checker only. Existing genesis already supplies the Plutus V3 model.
+services:
+  gov-cli:
+    environment:
+      LEIOS_PLUTUS_CHECKS: "true"

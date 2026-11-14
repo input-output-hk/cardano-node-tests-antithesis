@@ -32,6 +32,10 @@ on:
         description: "Opt-in valid BLS pool registration (pinned leios only)"
         type: boolean
         default: false
+      leios_plutus:
+        description: "Opt-in valid Plutus spends in certified EBs (pinned leios only)"
+        type: boolean
+        default: false
   schedule:
     # run once a week
     - cron: '5 1 * * 1'
@@ -79,6 +83,7 @@ jobs:
         MODE: ${{ inputs.mode || 'conway' }}
         LEIOS_STORAGE: ${{ inputs.leios_storage || false }}
         LEIOS_BLS: ${{ inputs.leios_bls || false }}
+        LEIOS_PLUTUS: ${{ inputs.leios_plutus || false }}
       run: |
         set -euo pipefail
         if [[ "$LEIOS_BLS" == "true" && "$MODE" != "leios" ]]; then
@@ -87,6 +92,10 @@ jobs:
         fi
         if [[ "$LEIOS_STORAGE" == "true" && "$MODE" != "leios" ]]; then
           echo "SQLite recovery requires pinned leios mode" >&2
+          exit 1
+        fi
+        if [[ "$LEIOS_PLUTUS" == "true" && "$MODE" != "leios" ]]; then
+          echo "Plutus EB checks require pinned leios mode" >&2
           exit 1
         fi
         echo "mode=$MODE" >> "$GITHUB_OUTPUT"
@@ -191,6 +200,7 @@ jobs:
       env:
         LEIOS_STORAGE: ${{ inputs.leios_storage || false }}
         LEIOS_BLS: ${{ inputs.leios_bls || false }}
+        LEIOS_PLUTUS: ${{ inputs.leios_plutus || false }}
         LEIOS_NODE_IMAGE: >-
           ${{ steps.mode.outputs.mode == 'leios-latest'
               && 'ghcr.io/input-output-hk/ouroboros-leios/cardano-node-leios:latest'
@@ -211,6 +221,9 @@ jobs:
         fi
         if [[ "$LEIOS_BLS" == "true" ]]; then
           bash scripts/enable-leios-bls.sh "$TESTNET"
+        fi
+        if [[ "$LEIOS_PLUTUS" == "true" ]]; then
+          bash scripts/enable-leios-plutus.sh "$TESTNET"
         fi
 
         git config user.name "github-actions[bot]"
@@ -341,6 +354,7 @@ jobs:
         GOV_CONFIGURATOR_IMG=$(jq -r '.services["gov-configurator"].image' <<< "$CONFIG")
         TX_FIREHOSE_IMG=$(jq -r '.services["tx-firehose"].image' <<< "$CONFIG")
         BLS_CHECKS=$(jq -r '.services["gov-cli"].environment.LEIOS_BLS_CHECKS // "false"' <<< "$CONFIG")
+        PLUTUS_CHECKS=$(jq -r '.services["gov-cli"].environment.LEIOS_PLUTUS_CHECKS // "false"' <<< "$CONFIG")
 
         {
           echo "### Antithesis test run"
@@ -353,6 +367,7 @@ jobs:
           echo "- node image: \`$NODE_IMG\`"
           echo "- protocol version: $PROTOCOL_VER, command era: $CMD_ERA"
           echo "- BLS registration checks: $BLS_CHECKS"
+          echo "- Plutus EB checks: $PLUTUS_CHECKS"
           echo "- gov-cli: \`$GOV_CLI_IMG\`"
           echo "- gov-configurator: \`$GOV_CONFIGURATOR_IMG\`"
           echo "- tx-firehose: \`$TX_FIREHOSE_IMG\`"

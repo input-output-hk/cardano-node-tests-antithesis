@@ -1,6 +1,7 @@
 """Exercise actual Compose merges and mode guards without a Docker daemon."""
 
 import copy
+import itertools
 import json
 import pathlib
 import re
@@ -22,6 +23,7 @@ class BlsTopology(unittest.TestCase):
         for name in [
             "docker-compose.yaml",
             "docker-compose.leios-bls.yaml",
+            "docker-compose.leios-plutus.yaml",
             "docker-compose.leios-storage.yaml",
             ".env",
         ]:
@@ -90,6 +92,37 @@ class BlsTopology(unittest.TestCase):
             self.assertEqual(services["p1"], original)
             self.assertIn("storage-node", services)
             for flag in ["LEIOS_STORAGE_CHECKS", "LEIOS_BLS_CHECKS"]:
+                self.assertEqual(services["gov-cli"]["environment"][flag], "true")
+
+    def test_plutus_changes_only_private_checker_flag(self):
+        self.leios()
+        before = self.config()
+        result = self.enable("plutus")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        after = self.config()
+        self.assertEqual(
+            after["services"]["gov-cli"]["environment"].pop("LEIOS_PLUTUS_CHECKS"), "true"
+        )
+        self.assertEqual(before, after)
+
+    def test_plutus_conway_and_latest_rejected_without_mutation(self):
+        for latest in [False, True]:
+            if latest:
+                self.leios(latest=True)
+            before = self.compose.read_text()
+            self.assertNotEqual(self.enable("plutus").returncode, 0)
+            self.assertEqual(self.compose.read_text(), before)
+
+    def test_all_private_options_compose_in_every_order(self):
+        for order in itertools.permutations(["storage", "bls", "plutus"]):
+            self.leios()
+            original = copy.deepcopy(self.config()["services"]["p1"])
+            for name in order:
+                result = self.enable(name)
+                self.assertEqual(result.returncode, 0, result.stderr)
+            services = self.config()["services"]
+            self.assertEqual(services["p1"], original)
+            for flag in ["LEIOS_STORAGE_CHECKS", "LEIOS_BLS_CHECKS", "LEIOS_PLUTUS_CHECKS"]:
                 self.assertEqual(services["gov-cli"]["environment"][flag], "true")
 
 
