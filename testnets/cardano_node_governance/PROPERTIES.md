@@ -598,6 +598,37 @@ transient failures are not assertions about transaction latency during faults.
 An empty pool query is pending coverage, not a historical disappearance check.
 This scenario does not test invalid proofs, rotation or committee participation.
 
+## Optional certified Plutus spends (pinned Leios only)
+
+Requires `LEIOS_PLUTUS_CHECKS=true` and Leios genesis. Disabled drivers emit no
+properties and create no private state, including when the flag is forced on
+Conway. The workflow rejects the option outside pinned `leios`.
+
+| Assertion | Kind | Meaning |
+| --- | --- | --- |
+| `leios_plutus_certified_and_immutable` | Sometimes, mandatory | A private valid V3 spend belongs to an EB certified by an RB on the immutable ancestry, and all four checks below pass at a stable immutable read point. Registered before setup guards. |
+| `leios_plutus_tx_size_matches` | Always | The certified EB trace's wire reference has the exact signed transaction's size. |
+| `leios_plutus_output_matches` | Always | Its immutable recipient output has exactly the expected address and lovelace, without unexpected assets. |
+| `leios_plutus_input_consumed` | Always | Its script input is absent at that immutable point. |
+| `leios_plutus_collateral_preserved` | Always | Its distinct collateral input remains at the private collateral address with its original amount and no extra assets. |
+| `leios_plutus_unavailable` | Sometimes, optional | Preparation, submission, or query was unavailable; diagnostic only. |
+| `leios_plutus_setup_failed` | Unreachable | Private immutable script inputs and collateral could not be prepared before releasing faults. |
+| `leios_plutus_submit entered`, `leios_plutus_observe entered`, `leios_plutus_recovery entered` | Reachable | Enabled driver entry. |
+| `leios_plutus_submit_aborted`, `leios_plutus_observe_aborted`, `leios_plutus_recovery_aborted` | Unreachable | Unexpected exception outside absorbed transient paths. |
+| `leios_plutus_submit_exits_zero`, `leios_plutus_observe_exits_zero`, `leios_plutus_recovery_exits_zero` | Always | Enabled wrapper exits normally. |
+
+Setup submits no script spends. Exact signed batches are journalled before any
+broadcast; the workload uses separate private funding, collateral and recipient
+credentials. Only immutable expiry retires an unproven spend. Ordinary RB
+inclusion, an orphan certificate, a cached completion flag, and unavailable or
+moving ledger reads never count as success. Saved certificate proofs survive
+trace pruning, but observations defer while a replaying relay is behind their
+certificate slot. Final recovery supplies new independent batches and observes
+for four genesis-derived immutability windows (minimum two minutes). Missing
+certified coverage remains a failure; there is no transaction latency invariant
+during faults. This tests basic valid V3 execution and collateral preservation,
+not invalid proofs/scripts, reference scripts, new builtins, or budget limits.
+
 ## Always vs Sometimes: two different questions, both useful
 
 `always` and `sometimes` aren't a strong/weak pair — they check different

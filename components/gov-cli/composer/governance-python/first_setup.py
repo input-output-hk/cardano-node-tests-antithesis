@@ -38,6 +38,7 @@ import time
 
 import helper_gov as g
 import helper_leios_bls as bls
+import helper_leios_plutus as plutus
 import helper_leios_storage_setup as storage_setup
 import helper_sdk as sdk
 import helper_treasury as treasury
@@ -322,6 +323,8 @@ def main() -> int:
     if g.SETUP_MARKER.exists():
         if not bls.prepare():
             return 1
+        if not plutus.prepare():
+            return 1
         if not storage_setup.prepare():
             return 1
         sdk.sometimes(True, "governance_setup_already_done")
@@ -390,6 +393,8 @@ def main() -> int:
     with contextlib.suppress(Exception):
         start_epoch = g.current_epoch(cluster)
     if not bls.prepare():
+        return 1
+    if not plutus.prepare():
         return 1
     try:
         # ~50 min/epoch at k=150 (epochLength is 100*k = 15000 slots x
