@@ -677,3 +677,17 @@ from the shared tracer-sidecar tooling (reused from the `master`
 testnet), not defined in this repo — e.g. `cluster fork depth < k`. Those
 show up in the Antithesis report's Properties panel too, under a
 different source (`tracer-sidecar.example`'s own SDK), not in this file.
+
+The sidecar is pinned to upstream `08d3c68` ([fix #255](https://github.com/cardano-foundation/cardano-node-antithesis/pull/255)).
+Its fork depth measures the rollback a host needs to follow the longest observed
+chain; a host merely behind on that chain contributes zero. A genuine fork at
+or above `k` still fails `cluster fork depth < k`. The sidecar and genesis
+generator share the single `SECURITY_PARAM` value in Compose (`150`), rather
+than the sidecar's master-testnet default of `432`. This check needs observed
+ancestry; it does not establish safety when the necessary ancestry is missing.
+
+The image retains the existing required sidecar properties and adds optional
+`cluster_fork_depth_<n>_observed` diagnostics for `n = 2, 3, 5, 10, 50, 100, 200`.
+These are Sometimes assertions with `must_hit=false`: they report observed fork
+depths without requiring those depths to occur. Its Amaru-specific checks are
+not enabled in this testnet.

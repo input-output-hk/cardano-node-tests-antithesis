@@ -70,6 +70,31 @@ class BlsTopology(unittest.TestCase):
             self.assertNotEqual(self.enable().returncode, 0)
             self.assertEqual(self.compose.read_text(), before)
 
+    def test_sidecar_uses_genesis_security_parameter_in_every_mode(self):
+        for mode in ["conway", "leios", "leios-latest"]:
+            if mode == "conway":
+                self.compose.write_text(self.original)
+            else:
+                self.leios(latest=mode == "leios-latest")
+            services = self.config()["services"]
+            self.assertEqual(
+                services["tracer-sidecar"]["environment"]["SECURITY_PARAM"],
+                services["gov-configurator"]["environment"]["SECURITY_PARAM"],
+                mode,
+            )
+
+    def test_single_security_parameter_change_reaches_both_services(self):
+        text, count = re.subn(
+            r'(SECURITY_PARAM:\s*(?:&\S+\s*)?")150(")',
+            r"\g<1>73\2",
+            self.original,
+        )
+        self.assertEqual(count, 1, "k must have exactly one literal declaration")
+        self.compose.write_text(text)
+        services = self.config()["services"]
+        for name in ["gov-configurator", "tracer-sidecar"]:
+            self.assertEqual(services[name]["environment"]["SECURITY_PARAM"], "73")
+
     def test_only_checker_environment_changes(self):
         self.leios()
         before = self.config()

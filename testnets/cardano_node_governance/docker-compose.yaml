@@ -72,7 +72,7 @@ services:
       # The only place k is written; generate.sh requires it and derives
       # epochLength as 100·k (10·k/f, f=0.1), which keeps the
       # nonce-stability window inside an epoch.
-      SECURITY_PARAM: "150"
+      SECURITY_PARAM: &security-param "150"
     volumes:
       - p1-configs:/configs/1
       - p2-configs:/configs/2
@@ -258,7 +258,8 @@ services:
       - /tmp
 
   tracer-sidecar:
-    image: ghcr.io/cardano-foundation/cardano-node-antithesis/tracer-sidecar:5271661
+    # Upstream 08d3c68: measure fork rollback, not same-chain catch-up lag.
+    image: ghcr.io/cardano-foundation/cardano-node-antithesis/tracer-sidecar@sha256:3f410888f940433d86ed9ad6ccd0e6e0535d676af27e0270ca75f301f9b37b8f
     container_name: tracer-sidecar
     hostname: tracer-sidecar.example
     labels:
@@ -267,6 +268,7 @@ services:
       - "/opt/cardano-tracer/logs"
     environment:
       POOLS: "3"
+      SECURITY_PARAM: *security-param
       CHAINPOINT_FILEPATH: "/opt/cardano-tracer/chainPoints.log"
     volumes:
       - tracer:/opt/cardano-tracer
