@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""eventually_votes_recorded.py — short post-fault recovery validation.
-
-`eventually_` runs after a driver has started; Antithesis stops faults
-and kills other drivers when it fires. Single-shot (not a polling
-loop): settle, then assert at least one action carries DRep + SPO
-votes. Cold-start guarded.
-"""
+"""Supply a private InfoAction and observe immutable votes after faults stop."""
 
 from __future__ import annotations
 
@@ -13,30 +7,35 @@ import time
 
 import helper_gov as g
 import helper_sdk as sdk
+import helper_vote_recovery as recovery
 
 
 def main() -> int:
     sdk.reachable("eventually_votes entered")
-    time.sleep(15)  # let the chain settle after faults stop
-
-    cluster = g.make_cluster()
-    if not g.wait_for_node(cluster, tries=30):
-        sdk.unreachable("eventually_cold_start")
+    sdk.sometimes(False, recovery.COVERAGE, {"reason": "awaiting_private_immutable_votes"})
+    if not g.SETUP_MARKER.exists():
         return 0
-
-    try:
-        gov_state = cluster.g_query.get_gov_state()
-    except Exception:  # noqa: BLE001
+    g.ensure_dirs()
+    readable = False
+    for attempt in range(recovery.recovery_checks() + 1):
+        if attempt:
+            time.sleep(recovery.POLL_SECONDS)
+        try:
+            with recovery.locked() as state:
+                if state is None:
+                    continue
+                state.pop("last", None)
+                try:
+                    complete = recovery.step(g.make_cluster(), state)
+                finally:
+                    readable = readable or bool(state.get("last"))
+                sdk.sometimes(complete, recovery.COVERAGE, state.get("last"))
+                if complete:
+                    return 0
+        except Exception as exc:  # noqa: BLE001
+            sdk.sometimes(True, "eventually_votes_unavailable", {"error": str(exc)}, must_hit=False)
+    if not readable:
         sdk.unreachable("eventually_cold_start")
-        return 0
-
-    voted = 0
-    for prop in gov_state.get("proposals", []) or []:
-        drep_n, spo_n, _cc_n = g.vote_counts(prop)
-        if drep_n >= 1 and spo_n >= 1:
-            voted += 1
-
-    sdk.sometimes(voted >= 1, "action_fully_voted_after_recovery")
     return 0
 
 

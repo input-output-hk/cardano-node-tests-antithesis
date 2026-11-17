@@ -487,13 +487,35 @@ exhausting the polling budget does not manufacture successful coverage.
 | `leios_tx_submission_unavailable` | Sometimes, optional | a retryable build/query/submit failure interrupted this invocation |
 | `leios_tx_query_unavailable` | Sometimes, optional | the immutable query failed or could not acquire a consistent point; no payment invariant is evaluated |
 
-## `eventually_votes_recorded.py` — post-fault recovery check
+## `eventually_votes_recorded.py` — private post-fault voting recovery
 
 | Assertion | Type | Meaning |
 |---|---|---|
 | `eventually_votes entered` | Reachable | recovery check ran |
-| `eventually_cold_start` | Unreachable | node/gov-state wasn't available after the settle window |
-| `action_fully_voted_after_recovery` | Sometimes | ≥1 action had both DRep and SPO votes after faults stopped |
+| `eventually_cold_start` | Unreachable | no readable immutable governance state was obtained throughout the bounded recovery attempts |
+| `action_fully_voted_after_recovery` | Sometimes, mandatory | the private recovery InfoAction has recorded votes from the selected registered DRep and SPO at a stable immutable point after faults stopped |
+| `eventually_votes_unavailable` | Sometimes, optional | a transient preparation, submission, or query failure interrupted an attempt; never evidence of voting |
+| `eventually_aborted` | Unreachable | unexpected recovery failure escaped the retry paths |
+| `eventually_votes_exits_zero` | Always | recovery completed through the SDK wrapper |
+
+Recovery supplies its own InfoAction instead of requiring other workloads to
+leave a voted proposal live at a particular moment. Payment and deposit-return
+stake keys, funds, transactions and the locked journal under
+`/gov-data/vote_recovery/` belong only to this lane. The network's existing
+registered DRep/SPO credentials are voting fixtures; votes target only the
+private proposal. No producer registration or global parameter changes occur.
+
+Funding and private stake registration are one transaction. Funding, proposal
+and vote transactions are each journalled with their exact signed bytes before
+broadcast and observed through immutable state. Only a successful immutable
+query plus immutable transaction expiry permits replacing an absent proposal.
+An incompletely voted proposal known to be expired at the immutable epoch is
+also replaced, even while it remains listed pending ledger cleanup. An
+unavailable query is never an empty live set. Recovery retries submission
+and observation for four genesis-derived immutability windows (minimum two
+minutes), even when the parallel creators/voters never ran. The mandatory
+property is registered before the setup guard and requires a fresh ledger
+observation, including on repeated invocations after earlier proposals expire.
 
 ## `finally_governance_summary.py` — end-of-run marker, no node calls
 
