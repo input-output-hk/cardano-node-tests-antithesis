@@ -1,0 +1,36 @@
+name: Check Moog wallet
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wallet-balance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Moog requester
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          directory=$(mktemp -d)
+          trap 'rm -rf "$directory"' EXIT
+          asset=moog-0.5.1.5-x86_64-linux-musl.tar.gz
+          gh release download v0.5.1.5 --repo cardano-foundation/moog \
+            --pattern "$asset" --dir "$directory"
+          tar xzf "$directory/$asset" -C "$directory"
+          install -m 0755 "$directory/moog" "$RUNNER_TEMP/moog"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Read public address and preprod balance
+        env:
+          MOOG_REQUESTER_WALLET: ${{ secrets.MOOG_REQUESTER_WALLET }}
+          MOOG_WALLET_PASSPHRASE: ${{ secrets.MOOG_WALLET_PASSPHRASE }}
+        run: python3 scripts/check-moog-wallet.py

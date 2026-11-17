@@ -62,6 +62,12 @@ See [`testnets/cardano_node_governance/README.md`](testnets/cardano_node_governa
   `moog wallet info` prints the address, and any preprod explorer shows
   its balance. Top up from the Cardano preprod faucet.
 
+The manual **Check Moog wallet** workflow reads the existing wallet secrets and
+shows only the public preprod address and ADA balance in its summary. It sends
+only that public address to [Koios](https://www.koios.rest/api.html#post-/address_info)
+and never signs, transfers funds, or requests an Antithesis run. An unavailable
+balance query is reported as unavailable, not as zero.
+
 ## Upstreams
 
 Two Cardano Foundation repos are load-bearing here but appear only as a workflow flag and as image
