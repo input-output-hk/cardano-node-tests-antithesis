@@ -18,7 +18,14 @@ from cardano_clusterlib import clusterlib
 STALE_CLAIM_EPOCHS = 2
 
 
-def observe(cluster: clusterlib.ClusterLib, idx: int, record: dict, live: dict) -> bool:
+def observe(
+    cluster: clusterlib.ClusterLib,
+    idx: int,
+    record: dict,
+    live: dict,
+    *,
+    observation: dict | None = None,
+) -> bool:
     """Check one claim and return whether an exact terminal payout was witnessed."""
     if "txid" not in record:
         # No broadcast occurred: the action id is journalled before submission.
@@ -61,6 +68,8 @@ def observe(cluster: clusterlib.ClusterLib, idx: int, record: dict, live: dict) 
         "volatile_proposal_live": bool(volatile_action),
         "waiting_reason": waiting_reason,
     }
+    if observation is not None:
+        observation.update(details)
     sdk.always(0 <= delta <= expected, "treasury_withdrawal_no_overpay", details)
 
     if is_ratified:

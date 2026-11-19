@@ -59,6 +59,7 @@ class TreasuryRecovery(unittest.TestCase):
                 build_sign_submit=mock.DEFAULT,
             ),
             mock.patch.object(recovery, "sdk", self.sdk),
+            mock.patch.object(recovery.recovery, "leios_window", return_value=None),
             mock.patch.object(recovery.checker, "sdk", self.sdk),
             mock.patch.object(recovery.time, "sleep"),
             mock.patch.object(
@@ -137,6 +138,44 @@ class TreasuryRecovery(unittest.TestCase):
         recovery.g.make_cluster.assert_not_called()
         self.sdk.sometimes.assert_not_called()
         self.sdk.always.assert_not_called()
+
+    def test_leios_prepared_epoch_boundary_settles_with_few_snapshots(self) -> None:
+        self.cluster.epoch_length = 15_000
+        self.cluster.slot_length = 0.2
+        self.tip.update(epoch=1, slot=27_000)
+
+        def snapshot(*_args):
+            paid = self.tip["epoch"] == 2
+            return self.tip.copy(), self.empty if paid else self.ratified, 30 if paid else 20
+
+        def advance(seconds):
+            self.tip["slot"] += round(seconds / self.cluster.slot_length)
+            self.tip["epoch"] = self.tip["slot"] // self.cluster.epoch_length
+
+        recovery.treasury.immutable_snapshot.side_effect = snapshot
+        recovery.time.sleep.side_effect = advance
+        recovery.treasury.gov_state.side_effect = lambda *_: (
+            self.empty if self.tip["epoch"] == 2 else self.ratified
+        )
+        with mock.patch.object(recovery.recovery, "leios_window", return_value=(3000, 1200)):
+            assert recovery.main() == 0
+        self.sdk.always.assert_any_call(True, "treasury_withdrawal_recovered")
+        self.sdk.always.assert_any_call(
+            True, "treasury_withdrawal_payout_matches_ratification", mock.ANY
+        )
+        assert recovery.treasury.immutable_snapshot.call_count == 3
+        assert sum(c.args[0] for c in recovery.time.sleep.call_args_list) == 600
+
+    def test_leios_stalled_epoch_fails_within_the_prepared_recovery_horizon(self) -> None:
+        self.cluster.epoch_length = 15_000
+        self.cluster.slot_length = 0.2
+        self.tip.update(epoch=1, slot=27_000)
+        with mock.patch.object(recovery.recovery, "leios_window", return_value=(3000, 1200)):
+            assert recovery.main() == 0
+        assert sum(c.args[0] for c in recovery.time.sleep.call_args_list) == 1200
+        self.sdk.always.assert_any_call(
+            False, "treasury_withdrawal_recovered", {"checks": 5, "last_error": None}
+        )
 
     def test_unpaid_ratified_action_still_fails_exact_accounting(self) -> None:
         self.claim["ratified_epoch"] = 1

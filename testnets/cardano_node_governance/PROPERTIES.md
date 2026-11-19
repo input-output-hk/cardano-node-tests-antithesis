@@ -249,8 +249,17 @@ depend on another workload's recovery command running first.
 The existing mandatory ratification and payout Sometimes assertions remain
 enabled. A successful recovery requires an exact terminal payout; missing
 claims, unavailable queries and stalled slots cannot count as success. Retry
-sleep is bounded by three genesis-derived epoch durations using a loop counter;
-exhaustion fails an Always assertion. Production k and epoch timing are unchanged.
+sleep is bounded using a loop counter; exhaustion fails an Always assertion.
+Conway retains its three-epoch budget and existing setup timing. In Leios,
+setup observes the guided action's immutable ratification and waits until its
+settlement boundary is at most two genesis-derived confirmation windows away
+before releasing faults. If optional setup already crossed settlement, an exact
+fresh immutable payout read is required instead. The terminal Leios budget is
+four confirmation windows (20 minutes at production k), including immutable
+confirmation and retry overhead. This keeps enactment reachable within a short
+terminal branch without changing k, epoch length, votes, or accounting checks.
+Quiet recovery backs off between epoch observations after ratification; query
+failures keep the short retry path. Production k and epoch timing are unchanged.
 Other terminal commands may be selected on other timelines; this command is a
 separate treasury recovery path, not a guarantee that every timeline settles.
 
@@ -260,6 +269,8 @@ separate treasury recovery path, not a guarantee that every timeline settles.
 | `treasury_withdrawal_recovered` | **Always** | the guided withdrawal settled for exactly its requested amount within the recovery budget |
 | `treasury_withdrawal_recovery_aborted` | **AlwaysOrUnreachable** | an unexpected exception escaped the recovery logic |
 | `treasury_withdrawal_recovery_exits_zero` | **Always** | recovery command returned zero; failures are assertions |
+| `leios_treasury_recovery_ready` | Sometimes, Leios only | setup freshly observed exact settlement or immutable ratification within the prepared settlement window |
+| `leios_treasury_recovery_setup_failed` | Unreachable, Leios only | setup could not position or verify the guided action within two epoch durations; faults must not be released |
 
 ## `parallel_driver_create_pparam_update.py` — submit one ParameterChange action
 

@@ -16,6 +16,7 @@ import anytime_treasury_withdrawal_enactment as checker
 import helper_gov as g
 import helper_sdk as sdk
 import helper_treasury as treasury
+import helper_treasury_recovery as recovery
 
 POLL_SECONDS = 5
 RECOVERY_EPOCHS = 3
@@ -30,9 +31,14 @@ def main() -> int:
     cluster = g.make_cluster()
     # A counter bounds elapsed sleep even if the node stops advancing slots.
     # Derive the budget from genesis; no change to k or production epoch timing.
-    checks = math.ceil(RECOVERY_EPOCHS * cluster.epoch_length * cluster.slot_length / POLL_SECONDS)
+    window = recovery.leios_window()
+    remaining_seconds = (
+        window[1] if window else RECOVERY_EPOCHS * cluster.epoch_length * cluster.slot_length
+    )
+    checks = math.ceil(remaining_seconds / POLL_SECONDS)
     last_error = None
     for attempt in range(checks + 1):
+        observation: dict = {}
         try:
             with (
                 treasury.lock() as observer_locked,
@@ -43,20 +49,28 @@ def main() -> int:
                     if record is None:
                         last_error = "guided recipient claim is missing"
                     elif checker.observe(
-                        cluster, treasury.GUIDED_RECEIVER, record, treasury.gov_state(cluster)
+                        cluster,
+                        treasury.GUIDED_RECEIVER,
+                        record,
+                        treasury.gov_state(cluster),
+                        observation=observation,
                     ):
                         sdk.always(True, "treasury_withdrawal_recovered")
                         return 0
         except Exception as exc:  # noqa: BLE001
             last_error = str(exc)
+            observation.clear()
             print(f"treasury recovery snapshot unavailable: {exc}", file=sys.stderr)
             sdk.sometimes(True, "treasury_withdrawal_query_unavailable")
-        if attempt < checks:
-            time.sleep(POLL_SECONDS)
+        if attempt == checks or remaining_seconds <= 0:
+            break
+        delay = min(remaining_seconds, recovery.poll_seconds(cluster, observation))
+        time.sleep(delay)
+        remaining_seconds -= delay
     sdk.always(
         False,
         "treasury_withdrawal_recovered",
-        {"checks": checks + 1, "last_error": last_error},
+        {"checks": attempt + 1, "last_error": last_error},
     )
     return 0
 

@@ -255,6 +255,7 @@ class BlsRegistration(unittest.TestCase):
                 mock.patch.object(setup, "_confirm_special_dreps"),
                 mock.patch.object(setup, "_setup_treasury_recv_pool"),
                 mock.patch.object(setup, "_prepare_treasury_payout", return_value=True),
+                mock.patch.object(setup.treasury_recovery, "prepare", return_value=True),
                 mock.patch.object(bls, "prepare", side_effect=prepare),
                 mock.patch.object(setup.storage_setup, "prepare", return_value=True),
                 mock.patch.object(setup, "sdk"),

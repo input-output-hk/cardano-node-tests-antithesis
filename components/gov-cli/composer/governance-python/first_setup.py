@@ -42,6 +42,7 @@ import helper_leios_plutus as plutus
 import helper_leios_storage_setup as storage_setup
 import helper_sdk as sdk
 import helper_treasury as treasury
+import helper_treasury_recovery as treasury_recovery
 import parallel_driver_create_treasury_withdrawal as treasury_creator
 import parallel_driver_vote_treasury_withdrawal as treasury_voter
 from cardano_clusterlib import clusterlib
@@ -445,6 +446,8 @@ def main() -> int:
         return 1
 
     if not storage_setup.prepare():
+        return 1
+    if not treasury_recovery.prepare(cluster):
         return 1
     g.SETUP_MARKER.touch()
     sdk.sometimes(True, "governance_setup_complete")
