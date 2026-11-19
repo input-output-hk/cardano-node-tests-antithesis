@@ -396,7 +396,7 @@ during a stall cost nothing, and registering it every tick is what makes
 a dead generator show up as a never-satisfied must-hit rather than as an
 absent property nobody notices.
 
-## `anytime_leios_endorser.py`: endorser-block propagation coverage
+## `anytime_leios_endorser.py` / `eventually_leios_endorser.py`: endorser-block propagation coverage
 
 Only `leios` and `leios-latest`: the generated genesis protocol major
 must be at least 12. Conway emits none of this driver's SDK properties.
@@ -404,25 +404,44 @@ must be at least 12. Conway emits none of this driver's SDK properties.
 | Assertion | Type | Meaning |
 |---|---|---|
 | `leios_endorser entered` | Reachable | Leios endorser probe ran |
-| `leios_nonempty_eb_propagated` | Sometimes | A producer forged an EB with `numTxs > 0` and another producer freshly acquired the same EB hash and slot during a probe window after setup |
+| `leios_nonempty_eb_propagated` | Sometimes, mandatory | A producer forged an EB with `numTxs > 0` and a different configured producer acquired the same EB hash and slot; the paired trace records may be read in separate invocations |
 | `leios_endorser_exits_zero` | Always | Leios probe completed normally |
 | `leios_endorser_aborted` | Unreachable | Leios probe raised an unexpected exception |
+| `leios_endorser_recovery entered` | Reachable | the independent terminal propagation observer ran |
+| `leios_endorser_recovery_exits_zero` | Always | the terminal propagation observer returned through the SDK wrapper |
+| `leios_endorser_recovery_aborted` | Unreachable | an unexpected exception escaped terminal propagation recovery |
+| `leios_endorser_unavailable` | Sometimes, optional | a transient trace/journal read interrupted this invocation, supplying no propagation witness |
 
 This is an Antithesis coverage witness, not a throughput target or a
 deadline on fault recovery. A partition can stop propagation for any
 individual sample. The property is emitted with False on samples with
 no match (including missing traces), so absent evidence cannot silently
 remove it from a Leios report. False samples during setup do not count
-startup traffic as evidence of exploration.
+startup traffic as a successful observation. The first successful post-setup
+observer query records a slot watermark; older EBs cannot satisfy the property.
 
 The driver reads the shared tracer volume read-only, matching
 `Consensus.LeiosKernel.BlockForged` to `BlockAcquired` across producers.
-It samples new acquisition records over 20 seconds, with up to 2 MiB
-read per log file per pass. Old acquisition records, self-acquisition,
-empty EBs, warnings and vote-scheduling events cannot satisfy it.
+The private locked journal under `/gov-data/leios_endorser/` retains file
+cursors and at most 8192 EB records, joining across scheduler gaps, out-of-order
+producer streams, restarts and rotated files. Reads are bounded to 2 MiB per
+file and 8 MiB per invocation; backlog is consumed on later calls in round-robin
+order rather than discarded by tail sampling. Partial records are retried.
+Self-acquisition, mismatched slots, empty EBs, warnings and vote-scheduling
+events cannot satisfy it. Both `p1` and `p1.example` hostnames are normalized.
 Matching hashes across a fork is still coverage, not evidence of
-canonical-chain inclusion or successful certification. No shared cursor
-or persistent observation state is needed between driver invocations.
+canonical-chain inclusion or successful certification. The terminal observer
+continues independently for four confirmation windows, without relying on an
+anytime command or another workload running. A quiet healthy chain can fit the
+15 TPS background traffic entirely into ranking blocks. Until a witness is
+found, this lane therefore supplies bounded padded payment batches using its
+own keys, funds and journal under `leios_endorser/payments/`. The stateless
+payment builder is reused; no other workload's accounts, execution order or
+completion flag is consulted. Exact signed batches are retained before
+broadcast, retried under faults, and retired only after immutable TTL expiry.
+The global firehose rate is unchanged. Conway creates no observer state and
+emits none of these properties. Submission or private journal entries alone
+never satisfy propagation: a real matching cross-producer trace pair is required.
 
 ## Isolated certified-EB payments — `parallel_driver_leios_transactions.py` / `anytime_leios_transactions.py` / `eventually_leios_transactions.py`
 
