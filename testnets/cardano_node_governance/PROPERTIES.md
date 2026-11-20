@@ -535,6 +535,10 @@ exhausting the polling budget does not manufacture successful coverage.
 | `eventually_votes_unavailable` | Sometimes, optional | a transient preparation, submission, or query failure interrupted an attempt; never evidence of voting |
 | `eventually_aborted` | Unreachable | unexpected recovery failure escaped the retry paths |
 | `eventually_votes_exits_zero` | Always | recovery completed through the SDK wrapper |
+| `vote_recovery_phase_query` | Sometimes, optional | recovery entered the immutable-query phase |
+| `vote_recovery_phase_prepare` | Sometimes, optional | recovery is preparing or replacing its own action |
+| `vote_recovery_phase_submit_votes` | Sometimes, optional | recovery reached preparation/submission of the selected role votes |
+| `vote_recovery_phase_wait_immutable` | Sometimes, optional | the selected votes are visible only at the volatile tip; this is not successful recovery |
 
 Recovery supplies its own InfoAction instead of requiring other workloads to
 leave a voted proposal live at a particular moment. Payment and deposit-return
@@ -543,9 +547,17 @@ stake keys, funds, transactions and the locked journal under
 registered DRep/SPO credentials are voting fixtures; votes target only the
 private proposal. No producer registration or global parameter changes occur.
 
-Funding and private stake registration are one transaction. Funding, proposal
-and vote transactions are each journalled with their exact signed bytes before
-broadcast and observed through immutable state. Only a successful immutable
+Initial funding and private stake registration remain one atomic transaction.
+Funding, proposal and vote transactions are each journalled
+with their exact signed bytes before broadcast. They use submission responses
+instead of clusterlib's synchronous confirmation loop. Once the private proposal
+is visible at the volatile tip, its dependent votes may be submitted immediately;
+recovery still succeeds only when both selected votes appear in a fresh stable
+immutable governance snapshot. This requires one final confirmation pipeline
+instead of a separate k-block wait after each transaction. The CLI's requirement
+for an already-registered deposit-return account is retained. No action or vote is
+pre-created by another workload, and no setup wait or epoch timing is changed.
+Only a successful immutable
 query plus immutable transaction expiry permits replacing an absent proposal.
 An incompletely voted proposal known to be expired at the immutable epoch is
 also replaced, even while it remains listed pending ledger cleanup. An

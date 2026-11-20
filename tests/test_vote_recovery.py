@@ -37,6 +37,7 @@ class PrivateVotes(unittest.TestCase):
             "stakePoolVotes": {},
         }
         self.gov = {"proposals": [self.prop]}
+        self.cluster.g_query.get_gov_state.return_value = self.gov
         self.state = {
             "funded": True,
             "action": {"txid": "target", "expiry": 150, "signed": "action.signed"},
@@ -69,6 +70,7 @@ class PrivateVotes(unittest.TestCase):
         )
         self.enterContext(mock.patch.object(r.g, "unique_token", return_value="unique"))
         self.save = self.enterContext(mock.patch.object(r, "save"))
+        self.enterContext(mock.patch.object(r, "sdk"))
         self.submit = self.enterContext(mock.patch.object(r.g, "build_sign_submit"))
 
     def test_only_own_immutable_proposal_with_selected_role_votes_succeeds(self):
@@ -195,8 +197,13 @@ class PrivateVotes(unittest.TestCase):
             self.assertEqual(kw["certificate_files"], [r.ROOT / "keys/return.cert"])
             self.assertEqual(kw["signing_key_files"], [r.ROOT / "keys/return.skey"])
             self.assertEqual(kw["txouts"][0].address, "private-source")
+            # The pinned CLI requires registration on-chain before it can
+            # build a proposal returning its deposit to this credential.
+            self.assertNotIn("proposal_files", kw)
+            self.assertFalse(kw["wait_for_confirmation"])
             kw["before_submit"]("funding-tx")
             self.assertEqual(self.state["funding"]["txid"], "funding-tx")
+            self.assertNotIn("action", self.state)
             self.save.assert_called()
 
         self.submit.side_effect = submit
@@ -205,6 +212,72 @@ class PrivateVotes(unittest.TestCase):
         self.query.return_value = (self.tip, {"funding-tx#0": {}})
         self.assertTrue(r.fund(self.cluster, self.state, self.accounts))
         self.assertTrue(self.state["funded"])
+
+    def test_volatile_proposal_is_enough_to_submit_votes_but_not_to_pass(self):
+        self.state.pop("funded")
+        self.gov["proposals"] = []
+        self.cluster.g_query.get_gov_state.return_value = {"proposals": [self.prop]}
+        with mock.patch.object(r, "fund") as fund:
+            self.assertFalse(r.step(self.cluster, self.state))
+            fund.assert_not_called()
+        self.assertIn("vote_files", self.submit.call_args.kwargs)
+        self.assertFalse(self.submit.call_args.kwargs["wait_for_confirmation"])
+        self.assertNotIn("funded", self.state)
+
+    def test_volatile_votes_are_not_an_immutable_recovery_witness(self):
+        self.gov["proposals"] = []
+        voted = copy.deepcopy(self.prop)
+        voted.update(dRepVotes={"drep-key": "VoteYes"}, stakePoolVotes={"spo-key": "VoteYes"})
+        self.cluster.g_query.get_gov_state.return_value = {"proposals": [voted]}
+        self.assertFalse(r.step(self.cluster, self.state))
+        self.submit.assert_not_called()
+        self.gov["proposals"] = [voted]
+        self.assertTrue(r.step(self.cluster, self.state))
+
+    def test_own_volatile_funding_can_prepare_a_proposal_without_claiming_immutability(self):
+        self.query.side_effect = None
+        self.query.return_value = (self.tip, {})
+        self.state = {"funding": {"txid": "funding", "expiry": 200, "signed": "funding.signed"}}
+        self.cluster.g_query.get_utxo.return_value = [types.SimpleNamespace(utxo_hash="funding")]
+        self.assertTrue(r.fund(self.cluster, self.state, self.accounts))
+        self.assertNotIn("funded", self.state)
+        self.submit.assert_not_called()
+
+    def test_failed_volatile_query_cannot_retire_an_absent_immutable_action(self):
+        self.gov["proposals"] = []
+        self.tip["slot"] = 9999
+        self.cluster.g_query.get_gov_state.side_effect = OSError("fault")
+        with self.assertRaises(OSError):
+            r.step(self.cluster, self.state)
+        self.assertIn("action", self.state)
+        self.submit.assert_not_called()
+
+    def test_rolled_back_volatile_funding_is_replayed_before_the_dependent_proposal(self):
+        self.state.pop("funded")
+        self.state["funding"] = {"txid": "fund", "expiry": 200, "signed": "fund.signed"}
+        self.gov["proposals"] = []
+        self.cluster.g_query.get_utxo.return_value = []
+        self.assertFalse(r.step(self.cluster, self.state))
+        self.assertEqual(
+            self.cluster.g_transaction.submit_tx_bare.call_args_list,
+            [mock.call(tx_file="fund.signed"), mock.call(tx_file="action.signed")],
+        )
+
+    def test_duplicate_funding_rejection_cannot_block_replay_of_its_proposal(self):
+        self.state.pop("funded")
+        self.state["funding"] = {"txid": "fund", "expiry": 200, "signed": "fund.signed"}
+        self.gov["proposals"] = []
+        self.cluster.g_query.get_utxo.return_value = []
+        self.cluster.g_transaction.submit_tx_bare.side_effect = [OSError("already included"), None]
+        self.assertFalse(r.step(self.cluster, self.state))
+        self.cluster.g_transaction.submit_tx_bare.assert_called_with(tx_file="action.signed")
+
+    def test_expired_funding_is_not_rebroadcast_with_a_still_pending_proposal(self):
+        self.state.pop("funded")
+        self.state["funding"] = {"txid": "fund", "expiry": 100, "signed": "fund.signed"}
+        self.gov["proposals"] = []
+        self.assertFalse(r.step(self.cluster, self.state))
+        self.cluster.g_transaction.submit_tx_bare.assert_called_once_with(tx_file="action.signed")
 
 
 class RecoveryScheduling(unittest.TestCase):
@@ -278,7 +351,7 @@ class ImmutableReads(unittest.TestCase):
             with self.assertRaises(ValueError):
                 r.immutable_query(cluster, ["gov-state"])
 
-    def test_production_budget_covers_three_confirmation_stages_plus_overhead(self):
+    def test_production_budget_retains_retry_headroom_for_pipelined_confirmation(self):
         with (
             tempfile.TemporaryDirectory() as directory,
             mock.patch.object(r.g, "GOV_STATE_DIR", pathlib.Path(directory)),

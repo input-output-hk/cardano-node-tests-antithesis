@@ -7,9 +7,11 @@ import contextlib
 import fcntl
 import json
 import math
+import pathlib
 import shutil
 
 import helper_gov as g
+import helper_sdk as sdk
 import parallel_driver_vote as voting
 from cardano_clusterlib import clusterlib
 
@@ -21,8 +23,8 @@ COVERAGE = "action_fully_voted_after_recovery"
 
 def recovery_checks() -> int:
     genesis = json.loads((g.GOV_STATE_DIR / "shelley/genesis.json").read_text())
-    # Funding+stake registration, proposal and votes each need immutability;
-    # reserve a fourth window for submission/retry overhead. No epoch wait.
+    # One immutable witness is required at the end. Reserve four windows for
+    # fault recovery and uncertain-submission retries, without epoch waits.
     seconds = 4 * genesis["securityParam"] * genesis["slotLength"] / genesis["activeSlotsCoeff"]
     return max(24, math.ceil(seconds / POLL_SECONDS))
 
@@ -118,9 +120,16 @@ def fund(cluster: clusterlib.ClusterLib, state: dict, accounts: dict) -> bool:
         save(state)
         return True
     pending = state.get("funding")
-    if pending and tip["slot"] < pending["expiry"]:
-        rebroadcast(cluster, pending)
-        return False
+    if pending:
+        # The account registration is atomic with the private output. The
+        # CLI needs that registration on-chain before building a proposal,
+        # but it does not need to be immutable to submit dependent work.
+        current = cluster.g_query.get_utxo(address=accounts["address"])
+        if any(u.utxo_hash == pending["txid"] for u in current):
+            return True
+        if tip["slot"] < pending["expiry"]:
+            rebroadcast(cluster, pending)
+            return False
     keys, bound = ROOT / "keys", expiry(cluster)
     g.build_sign_submit(
         cluster,
@@ -139,6 +148,7 @@ def fund(cluster: clusterlib.ClusterLib, state: dict, accounts: dict) -> bool:
         invalid_hereafter=bound,
         submission_file=ROOT / "funding.signed",
         before_submit=journal(state, "funding", bound),
+        wait_for_confirmation=False,
     )
     return False
 
@@ -152,28 +162,34 @@ def source(accounts: dict) -> clusterlib.AddressRecord:
     )
 
 
-def create(cluster: clusterlib.ClusterLib, state: dict, accounts: dict) -> None:
-    token, bound = g.unique_token(), expiry(cluster)
+def info_file(cluster: clusterlib.ClusterLib, accounts: dict, name: str) -> pathlib.Path:
     info = cluster.g_governance.action.create_info(
-        action_name="recovery_info_" + token,
+        action_name=name,
         deposit_amt=cluster.g_query.get_gov_action_deposit(),
         anchor_url=g.ANCHOR_URL,
         anchor_data_hash=cluster.g_governance.get_anchor_data_hash(text=g.ANCHOR_TEXT),
         deposit_return_stake_vkey_file=ROOT / "keys" / accounts["stake_vkey"],
         destination_dir=ROOT,
     )
+    return info.action_file
+
+
+def create(cluster: clusterlib.ClusterLib, state: dict, accounts: dict) -> None:
+    token, bound = g.unique_token(), expiry(cluster)
     g.build_sign_submit(
         cluster,
         "recovery_create_" + token,
-        proposal_files=[info.action_file],
+        proposal_files=[info_file(cluster, accounts, "recovery_info_" + token)],
         src_addr=source(accounts),
         invalid_hereafter=bound,
         submission_file=ROOT / "action.signed",
         before_submit=journal(state, "action", bound),
+        wait_for_confirmation=False,
     )
 
 
 def step(cluster: clusterlib.ClusterLib, state: dict) -> bool:
+    sdk.sometimes(True, "vote_recovery_phase_query", must_hit=False)
     tip, gov = immutable_query(cluster, ["gov-state"])
     if not isinstance(gov.get("proposals"), list):
         msg = "immutable governance query did not contain a proposals list"
@@ -184,45 +200,79 @@ def step(cluster: clusterlib.ClusterLib, state: dict) -> bool:
         "live": len(gov["proposals"]),
     }
     accounts = fixtures(cluster)
-    if not fund(cluster, state, accounts):
-        return False
     action = state.get("action")
     if action is None:
+        sdk.sometimes(True, "vote_recovery_phase_prepare", state["last"], must_hit=False)
+        if not fund(cluster, state, accounts):
+            return False
         create(cluster, state, accounts)
         return False
     prop = g.lookup_proposal(gov, action["txid"])
     state["last"]["txid"] = action["txid"]
-    if prop is None:
-        if tip["slot"] < action["expiry"]:
-            rebroadcast(cluster, action)
-        else:
-            # Only a successful immutable query plus immutable TTL expiry can
-            # replace an absent action. Query failure never means an empty set.
-            state.pop("action")
-            state.pop("votes", None)
-        return False
     roster = voting.build_voters(cluster)
     voters = [next(v for v in roster if v[0] == kind) for kind in ("drep", "spo")]
     selected = [(v, voting.voter_hash(cluster, v)) for v in voters]
-    missing = [
+    immutable_missing = [
         (v, key)
         for v, key in selected
-        if voting.recorded_vote(prop, v[0], key) not in ("VoteYes", "VoteNo", "VoteAbstain")
+        if prop is None
+        or voting.recorded_vote(prop, v[0], key) not in ("VoteYes", "VoteNo", "VoteAbstain")
     ]
-    state["last"]["recorded"] = {v[0]: voting.recorded_vote(prop, v[0], key) for v, key in selected}
-    if not missing:
+    state["last"]["recorded"] = {
+        v[0]: voting.recorded_vote(prop, v[0], key) if prop else None for v, key in selected
+    }
+    if not immutable_missing:
+        state["funded"] = True
         return True
-    if tip["epoch"] > prop["expiresAfter"]:
+    if prop is not None:
+        state["funded"] = True
+    if prop is not None and tip["epoch"] > prop["expiresAfter"]:
         # Expired actions remain in governance queries until a later cleanup
         # epoch, but the ledger already rejects new votes for them.
         state.pop("action")
         state.pop("votes", None)
+        return False
+    # Volatile inclusion is enough to submit a dependent vote, never enough
+    # to satisfy coverage. This pipelines proposal+vote confirmation instead
+    # of waiting a full k blocks between each transaction.
+    live = cluster.g_query.get_gov_state()
+    if not isinstance(live, dict) or not isinstance(live.get("proposals"), list):
+        msg = "volatile recovery query did not contain a proposals list"
+        raise TypeError(msg)
+    candidate = g.lookup_proposal(live, action["txid"])
+    if candidate is None:
+        funding = state.get("funding")
+        if not state.get("funded") and funding and tip["slot"] < funding["expiry"]:
+            current = cluster.g_query.get_utxo(address=accounts["address"])
+            if not any(u.utxo_hash == funding["txid"] for u in current):
+                # The volatile funding block may have rolled back after the
+                # dependent proposal was signed. Replay the parent first.
+                # A duplicate-parent rejection must not prevent retrying the
+                # proposal: it may simply mean the parent is already included.
+                with contextlib.suppress(Exception):
+                    rebroadcast(cluster, funding)
+        if tip["slot"] < action["expiry"]:
+            rebroadcast(cluster, action)
+        elif prop is None:
+            # Only successful queries plus immutable TTL expiry can replace
+            # an absent action. An unknown query never retires a transaction.
+            state.pop("action")
+            state.pop("votes", None)
+        return False
+    missing = [
+        (v, key)
+        for v, key in selected
+        if voting.recorded_vote(candidate, v[0], key) not in ("VoteYes", "VoteNo", "VoteAbstain")
+    ]
+    if not missing:
+        sdk.sometimes(True, "vote_recovery_phase_wait_immutable", state["last"], must_hit=False)
         return False
     pending = state.get("votes")
     if pending and tip["slot"] < pending["expiry"]:
         rebroadcast(cluster, pending)
         return False
     token, bound = g.unique_token(), expiry(cluster)
+    sdk.sometimes(True, "vote_recovery_phase_submit_votes", state["last"], must_hit=False)
     files, signing = [], []
     for voter, _key in missing:
         kind, factory, keyword, vkey, skey = voter
@@ -245,5 +295,6 @@ def step(cluster: clusterlib.ClusterLib, state: dict) -> bool:
         invalid_hereafter=bound,
         submission_file=ROOT / "votes.signed",
         before_submit=journal(state, "votes", bound),
+        wait_for_confirmation=False,
     )
     return False

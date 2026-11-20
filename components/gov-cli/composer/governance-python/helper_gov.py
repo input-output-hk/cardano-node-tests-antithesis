@@ -329,6 +329,7 @@ def build_sign_submit(
     before_submit: cabc.Callable[[str], None] | None = None,
     treasury_donation: int | None = None,
     submission_file: pathlib.Path | None = None,
+    wait_for_confirmation: bool = True,
 ) -> str:
     """Build, sign, submit. Returns txid.
 
@@ -339,6 +340,9 @@ def build_sign_submit(
     invalid_hereafter bounds how long an uncertain submission can still land.
     submission_file retains the exact signed bytes before journalling so setup
     can safely rebroadcast an interrupted submission, including after a restart.
+    wait_for_confirmation=False returns after the node's submission response;
+    the caller must establish inclusion separately. Existing callers retain
+    clusterlib's confirmation wait by default.
     """
     fa = src_addr if src_addr is not None else faucet()
     lock_ctx = contextlib.nullcontext() if src_addr is not None else faucet_lock()
@@ -376,7 +380,10 @@ def build_sign_submit(
         # process killed during submission must not lose a possibly accepted tx.
         if before_submit is not None:
             before_submit(txid)
-        cluster.g_transaction.submit_tx(tx_file=signed, txins=out.txins)
+        if wait_for_confirmation:
+            cluster.g_transaction.submit_tx(tx_file=signed, txins=out.txins)
+        else:
+            cluster.g_transaction.submit_tx_bare(tx_file=signed)
     return txid
 
 
