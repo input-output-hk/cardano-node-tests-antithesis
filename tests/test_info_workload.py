@@ -116,6 +116,53 @@ class InfoVoting(unittest.TestCase):
             call.args[1].startswith("vote_recorded_") for call in self.sdk.sometimes.call_args_list
         )
 
+    def test_voter_can_create_and_vote_without_the_creator_command(self) -> None:
+        with (
+            mock.patch.object(g, "live_info_actions", side_effect=[[], [self.prop]]),
+            mock.patch.object(voter.creator, "create", return_value="first") as create,
+        ):
+            address = mock.Mock()
+            self.assertEqual(voter.cast(self.cluster, address), 0)
+        create.assert_called_once_with(self.cluster, address)
+        self.submit.assert_called_once()
+        self.sdk.sometimes.assert_any_call(True, "actions_live", {"live": 1})
+
+    def test_unknown_query_cannot_trigger_a_new_proposal_or_invent_coverage(self) -> None:
+        with (
+            mock.patch.object(g, "live_info_actions", side_effect=OSError("query fault")),
+            mock.patch.object(voter.creator, "create") as create,
+        ):
+            self.assertEqual(voter.cast(self.cluster, mock.Mock()), 0)
+        create.assert_not_called()
+        self.submit.assert_not_called()
+        self.sdk.sometimes.assert_any_call(
+            True, "info_action_vote_unavailable", mock.ANY, must_hit=False
+        )
+        self.assertFalse(
+            any(c.args[:2] == (True, "actions_live") for c in self.sdk.sometimes.call_args_list)
+        )
+
+
+class StrictInfoQuery(unittest.TestCase):
+    def test_only_votable_info_actions_are_returned(self):
+        cluster = mock.Mock()
+        cluster.g_query.get_tip.return_value = {"epoch": 2}
+        live = {"expiresAfter": 2, "proposalProcedure": {"govAction": {"tag": "InfoAction"}}}
+        expired = copy.deepcopy(live)
+        expired["expiresAfter"] = 1
+        cluster.g_query.get_gov_state.return_value = {"proposals": [expired, live]}
+        self.assertEqual(g.live_info_actions(cluster, strict=True), [live])
+
+    def test_missing_or_unavailable_query_is_not_a_known_empty_queue(self):
+        cluster = mock.Mock()
+        for value in [{}, {"proposals": None}, []]:
+            cluster.g_query.get_gov_state.return_value = value
+            with self.assertRaises(TypeError):
+                g.live_info_actions(cluster, strict=True)
+        cluster.g_query.get_gov_state.side_effect = OSError("fault")
+        with self.assertRaises(OSError):
+            g.live_info_actions(cluster, strict=True)
+
 
 if __name__ == "__main__":
     unittest.main()

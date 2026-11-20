@@ -15,6 +15,23 @@ import sys
 
 import helper_gov as g
 import helper_sdk as sdk
+from cardano_clusterlib import clusterlib
+
+
+def create(cluster: clusterlib.ClusterLib, addr: clusterlib.AddressRecord) -> str:
+    """One InfoAction using the caller's held payment-address lock."""
+    tok = g.unique_token()
+    info = cluster.g_governance.action.create_info(
+        action_name=f"info_{tok}",
+        deposit_amt=cluster.g_query.get_gov_action_deposit(),
+        anchor_url=g.ANCHOR_URL,
+        anchor_data_hash=cluster.g_governance.get_anchor_data_hash(text=g.ANCHOR_TEXT),
+        deposit_return_stake_vkey_file=g.GD / "vote_stake_addr1_stake.vkey",
+        destination_dir=str(g.WORK),
+    )
+    return g.build_sign_submit(
+        cluster, f"info_{tok}", proposal_files=[info.action_file], src_addr=addr
+    )
 
 
 def main() -> int:
@@ -35,23 +52,8 @@ def main() -> int:
             sdk.unreachable("create_action_node_not_ready")
             return 0
 
-        tok = g.unique_token()
-        deposit = cluster.g_query.get_gov_action_deposit()
-        anchor_hash = cluster.g_governance.get_anchor_data_hash(text=g.ANCHOR_TEXT)
-
-        info = cluster.g_governance.action.create_info(
-            action_name=f"info_{tok}",
-            deposit_amt=deposit,
-            anchor_url=g.ANCHOR_URL,
-            anchor_data_hash=anchor_hash,
-            deposit_return_stake_vkey_file=g.GD / "vote_stake_addr1_stake.vkey",
-            destination_dir=str(g.WORK),
-        )
-
         try:
-            txid = g.build_sign_submit(
-                cluster, f"info_{tok}", proposal_files=[info.action_file], src_addr=addr
-            )
+            txid = create(cluster, addr)
         except Exception as exc:  # noqa: BLE001
             print(f"info action submit failed transiently: {exc} (will retry)", file=sys.stderr)
             sdk.sometimes(False, "info_action_created")

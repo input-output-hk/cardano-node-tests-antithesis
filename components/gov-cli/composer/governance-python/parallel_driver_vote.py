@@ -9,7 +9,9 @@ it, so a transient submit/lock failure is self-healing (the action is
 simply picked again next tick). Submits missing DRep, SPO and committee votes
 with independent random decisions (yes / no / abstain). Missing credentials
 are batched onto one expiring InfoAction before replacements are attempted.
-Live chain state remains the queue after interrupted submissions.
+Live chain state remains the queue after interrupted submissions. A known
+empty queue is seeded within the same invocation, so scheduling a voter
+before the separate creator still exercises the full participation path.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ import sys
 
 import helper_gov as g
 import helper_sdk as sdk
+import parallel_driver_create_action as creator
 from cardano_clusterlib import clusterlib
 
 
@@ -87,7 +90,20 @@ def participation(prop: dict) -> None:
 
 
 def cast(cluster: clusterlib.ClusterLib, addr: clusterlib.AddressRecord) -> int:
-    props = g.live_info_actions(cluster)
+    sdk.sometimes(False, "actions_live", {"reason": "awaiting_votable_info_action"})
+    try:
+        props = g.live_info_actions(cluster, strict=True)
+        if not props:
+            # An anytime/parallel voter can be selected before the separate
+            # creator on every explored branch. Supply this workload's own
+            # action under the existing address lock instead of depending on
+            # another command's execution order.
+            creator.create(cluster, addr)
+            sdk.sometimes(True, "info_action_created")
+            props = g.live_info_actions(cluster, strict=True)
+    except Exception as exc:  # noqa: BLE001
+        sdk.sometimes(True, "info_action_vote_unavailable", {"error": str(exc)}, must_hit=False)
+        return 0
     sdk.sometimes(bool(props), "actions_live", {"live": len(props)})
     for prop in props:
         participation(prop)

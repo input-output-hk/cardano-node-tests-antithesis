@@ -432,17 +432,30 @@ def unique_token() -> str:
 # failure is self-healing (the action reappears next tick).
 
 
-def live_info_actions(cluster: clusterlib.ClusterLib) -> list[dict]:
+def live_info_actions(cluster: clusterlib.ClusterLib, *, strict: bool = False) -> list[dict]:
     """Return the current InfoAction proposals (each a full gov-state
-    proposal). Empty list if none or if the node can't be reached."""
+    proposal). The legacy default absorbs unavailable queries. strict=True
+    propagates unknown state and excludes proposals past their voting epoch.
+    """
     try:
-        proposals = cluster.g_query.get_gov_state().get("proposals", []) or []
+        state = cluster.g_query.get_gov_state()
+        proposals = state.get("proposals") if isinstance(state, dict) else None
+        if not isinstance(proposals, list):
+            msg = "InfoAction query did not return a proposals list"
+            raise TypeError(msg)
+        epoch = cluster.g_query.get_tip()["epoch"] if strict else None
+        if strict and type(epoch) is not int:
+            msg = "InfoAction query did not return a current epoch"
+            raise TypeError(msg)
         return [
             p
             for p in proposals
             if p.get("proposalProcedure", {}).get("govAction", {}).get("tag") == "InfoAction"
+            and (epoch is None or p["expiresAfter"] >= epoch)
         ]
-    except Exception:  # noqa: BLE001
+    except Exception:
+        if strict:
+            raise
         return []
 
 

@@ -84,12 +84,20 @@ an already reached threshold. The majority is a count of recorded votes of any
 decision, not a stake-weighted approval threshold. Coverage is seeded false
 once setup completes.
 
+The voter does not depend on the separate creator being scheduled first.
+After a successful query finds no votable InfoAction, it creates one using
+the payment address it already holds, re-queries the ledger, and casts the
+same missing-credential batch. Expired proposals are excluded using the
+current epoch. Missing or unavailable queries remain unknown: they cannot
+trigger creation or count as an empty/live queue.
+
 | Assertion | Type | Meaning |
 |---|---|---|
 | `vote entered` | Reachable | driver ran |
 | `vote_node_not_ready` | Unreachable | node never answered within the wait budget |
 | `actions_live` | Sometimes | ≥1 votable action existed in gov-state |
 | `vote_transient_failure` | Sometimes | a vote submit failed transiently (retried next tick) |
+| `info_action_vote_unavailable` | Sometimes, optional | preparation or a strict InfoAction query was interrupted; no live-action or vote evidence is invented |
 | `vote_submitted` | Reachable | a vote was actually submitted |
 | `vote_recorded_<kind>` | Sometimes | the submitted credential's exact decision was recorded for that voter kind |
 | `vote_decision_<yes\|no\|abstain>` | Sometimes | that decision was cast at least once |
