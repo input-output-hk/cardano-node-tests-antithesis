@@ -29,6 +29,38 @@ import sys
 
 import helper_gov as g
 import helper_sdk as sdk
+from cardano_clusterlib import clusterlib
+
+
+def create(cluster: clusterlib.ClusterLib, addr: clusterlib.AddressRecord) -> str:
+    """Submit this workload's allowlisted action using the caller's source lock."""
+    param_key, param_arg, values = g.PPARAM_ALLOWLIST[g.rng_mod(len(g.PPARAM_ALLOWLIST))]
+    value = values[g.rng_mod(2)]
+    prev_txid, prev_ix = g.get_prev_pparam_action(cluster)
+    tok = g.unique_token()
+    ret_idx = g.rng_mod(g.NUM_DREPS) + 1
+    ret_vkey = g.GD / f"vote_stake_addr{ret_idx}_stake.vkey"
+    pparam_update = cluster.g_governance.action.create_pparams_update(
+        action_name=f"pparam_update_{tok}",
+        deposit_amt=cluster.g_query.get_gov_action_deposit(),
+        anchor_url=g.ANCHOR_URL,
+        anchor_data_hash=cluster.g_governance.get_anchor_data_hash(text=g.ANCHOR_TEXT),
+        cli_args=[param_arg, str(value)],
+        prev_action_txid=prev_txid,
+        prev_action_ix=prev_ix,
+        deposit_return_stake_vkey_file=ret_vkey,
+        destination_dir=str(g.WORK),
+    )
+    txid = g.build_sign_submit(
+        cluster,
+        f"pparam_update_{tok}",
+        proposal_files=[pparam_update.action_file],
+        src_addr=addr,
+    )
+    g.record_pending_pparam_update(txid, 0, param_key, value)
+    print(f"pparam update submitted: {txid} ({param_key}={value})", file=sys.stderr)
+    sdk.sometimes(True, "pparam_update_created", {"param": param_key, "value": value})
+    return txid
 
 
 def main() -> int:
@@ -49,44 +81,8 @@ def main() -> int:
             sdk.unreachable("create_pparam_update_node_not_ready")
             return 0
 
-        param_key, param_arg, values = g.PPARAM_ALLOWLIST[g.rng_mod(len(g.PPARAM_ALLOWLIST))]
-        value = values[g.rng_mod(2)]
-
         try:
-            prev_txid, prev_ix = g.get_prev_pparam_action(cluster)
-        except Exception as exc:  # noqa: BLE001
-            print(
-                f"could not query prev ParameterChange action: {exc} (will retry)", file=sys.stderr
-            )
-            return 0
-
-        tok = g.unique_token()
-
-        ret_idx = g.rng_mod(g.NUM_DREPS) + 1
-        ret_vkey = g.GD / f"vote_stake_addr{ret_idx}_stake.vkey"
-
-        deposit = cluster.g_query.get_gov_action_deposit()
-        anchor_hash = cluster.g_governance.get_anchor_data_hash(text=g.ANCHOR_TEXT)
-
-        pparam_update = cluster.g_governance.action.create_pparams_update(
-            action_name=f"pparam_update_{tok}",
-            deposit_amt=deposit,
-            anchor_url=g.ANCHOR_URL,
-            anchor_data_hash=anchor_hash,
-            cli_args=[param_arg, str(value)],
-            prev_action_txid=prev_txid,
-            prev_action_ix=prev_ix,
-            deposit_return_stake_vkey_file=ret_vkey,
-            destination_dir=str(g.WORK),
-        )
-
-        try:
-            txid = g.build_sign_submit(
-                cluster,
-                f"pparam_update_{tok}",
-                proposal_files=[pparam_update.action_file],
-                src_addr=addr,
-            )
+            create(cluster, addr)
         except Exception as exc:  # noqa: BLE001
             print(
                 f"pparam update submit failed transiently: {exc} (will retry)",
@@ -94,11 +90,6 @@ def main() -> int:
             )
             sdk.sometimes(False, "pparam_update_created")
             return 0
-
-        g.record_pending_pparam_update(txid, 0, param_key, value)
-
-        print(f"pparam update created: {txid} ({param_key}={value})", file=sys.stderr)
-        sdk.sometimes(True, "pparam_update_created", {"param": param_key, "value": value})
 
         if g.recent_stall(cluster):
             sdk.sometimes(True, "gov_op_under_perturbation", {"op": "create_pparam_update"})
