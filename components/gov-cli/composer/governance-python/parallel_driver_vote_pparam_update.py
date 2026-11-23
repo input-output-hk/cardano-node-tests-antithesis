@@ -29,6 +29,7 @@ import sys
 import helper_gov as g
 import helper_sdk as sdk
 import helper_voting_progress as progress
+import parallel_driver_create_pparam_update as creator
 from cardano_clusterlib import clusterlib
 
 
@@ -83,6 +84,9 @@ def participation(prop: dict) -> None:
 def cast(cluster: clusterlib.ClusterLib, addr: clusterlib.AddressRecord) -> int:
     try:
         state = cluster.g_query.get_gov_state()
+        if not isinstance(state.get("proposals"), list):
+            msg = "ParameterChange query did not contain a proposals list"
+            raise TypeError(msg)
         props = [
             p
             for p in state["proposals"]
@@ -92,6 +96,9 @@ def cast(cluster: clusterlib.ClusterLib, addr: clusterlib.AddressRecord) -> int:
         for prop in props:
             participation(prop)
         epoch = g.current_epoch(cluster)
+        if type(epoch) is not int:
+            msg = "ParameterChange query did not contain a current epoch"
+            raise TypeError(msg)
     except Exception as exc:  # noqa: BLE001
         print(f"pparam vote query unavailable: {exc} (will retry)", file=sys.stderr)
         sdk.sometimes(True, "pparam_update_vote_query_unavailable")
@@ -99,6 +106,28 @@ def cast(cluster: clusterlib.ClusterLib, addr: clusterlib.AddressRecord) -> int:
     # Expired actions can remain listed until the next ledger cleanup epoch.
     props = [p for p in props if p["expiresAfter"] >= epoch]
     sdk.sometimes(bool(props), "pparam_update_actions_live", {"live": len(props)})
+    if not props and progress.enabled():
+        try:
+            creator.create(cluster, addr)
+            # Re-enter only once, after a fresh successful ledger query. A
+            # delayed inclusion must not recursively create more proposals.
+            state = cluster.g_query.get_gov_state()
+            epoch = cluster.g_query.get_epoch()
+            if not isinstance(state.get("proposals"), list) or type(epoch) is not int:
+                msg = "ParameterChange supply query returned an unknown schema"
+                raise TypeError(msg)
+            props = [
+                p
+                for p in state["proposals"]
+                if p["proposalProcedure"]["govAction"]["tag"] == "ParameterChange"
+                and p["expiresAfter"] >= epoch
+            ]
+            sdk.sometimes(bool(props), "pparam_update_actions_live", {"live": len(props)})
+        except Exception as exc:  # noqa: BLE001
+            sdk.sometimes(
+                True, "pparam_update_vote_supply_unavailable", {"error": str(exc)}, must_hit=False
+            )
+            return 0
     if not props:
         return 0
     props.sort(

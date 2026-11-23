@@ -332,6 +332,12 @@ nor observers acquire it. Participation is checked before and after submission,
 and the majority coverage goal is registered false after setup even if no vote
 can be submitted. A query failure remains unknown and is retried later.
 
+On Leios, a successfully queried empty votable set is supplied by the same
+invocation using the existing ParameterChange creator's allowlist and lineage
+query. The voter then re-queries and fills missing votes. Conway retains its
+existing separate creator path. Submission and CLI waits use the same bounds
+as Leios InfoAction voting.
+
 | Assertion | Type | Meaning |
 |---|---|---|
 | `vote_pparam_update entered` | Reachable | driver ran |
@@ -341,11 +347,41 @@ can be submitted. A query failure remains unknown and is retried later.
 | `pparam_update_vote_submitted` | Reachable | a vote was actually submitted |
 | `pparam_update_vote_recorded_<kind>` | Sometimes | the specific submitted DRep/CC credential has the requested decision recorded |
 | `pparam_update_vote_query_unavailable` | Sometimes | a governance/epoch query failed; no recorded vote or empty ledger state is invented |
+| `pparam_update_vote_supply_unavailable` | Sometimes, optional | Leios proposal preparation, submission, or its subsequent query was interrupted; retry later without inventing evidence |
 | `pparam_update_vote_decision_<yes\|no\|abstain>` | Sometimes | that decision was cast at least once |
 | `pparam_update_vote_decision_<decision>_by_<kind>` | Sometimes | that decision/voter-kind combination occurred |
 | `pparam_update_voted_by_drep_and_cc` | Sometimes | a single action got votes from both roles |
 | `pparam_update_majority_reached` | Sometimes | a single action has at least ceil((NUM_DREPS + NUM_CC)/2) recorded votes of any decision; participation, not ratification |
 | `gov_op_under_perturbation` (`op: vote_pparam_update`) | Sometimes | a vote landed while the chain was recently stalled |
+
+## `eventually_leios_info_voting.py` and `eventually_leios_pparam_voting.py`
+
+Independent Leios-only post-fault retries for the two ordinary voting
+workloads. Each invokes only its own voter and can supply its own proposal;
+neither requires the other workload or a separately scheduled creator.
+No new funds, credentials, locks, or shared journal are introduced: each
+retains its existing workload lock and payment-source lock, and live
+gov-state remains the proposal queue. Recovery reserves four genesis-derived
+confirmation windows of polling, with at least 24 polls for accelerated local
+networks. Each operation also has the finite CLI/submission bounds above.
+The slot deadline includes submission time, and four consecutive steps
+without tip progress (or with unavailable queries) stop retries even when
+the chain cannot advance. Outer polling counts alone are not the deadline.
+
+Recovery stops only after a fresh query shows a votable proposal with a
+recorded majority **and** every eligible role represented, on the same
+proposal. The original `actions_live`, `action_majority_reached`,
+`action_voted_by_all_roles`, and corresponding `pparam_update_*` properties
+remain mandatory and are observed by these retries as well as by parallel
+drivers. Exhausting retries does not satisfy them. These commands perform no
+workload operations or ledger queries on Conway.
+
+| Assertion | Type | Meaning |
+|---|---|---|
+| `leios_info_voting_recovery entered` / `leios_pparam_voting_recovery entered` | Reachable | command ran |
+| `leios_info_voting_recovery_unavailable` / `leios_pparam_voting_recovery_unavailable` | Sometimes, optional | this workload's retry was interrupted or could not query the ledger |
+| `leios_info_voting_recovery_aborted` / `leios_pparam_voting_recovery_aborted` | Unreachable | unexpected command failure |
+| `leios_info_voting_recovery_exits_zero` / `leios_pparam_voting_recovery_exits_zero` | Always | command returns zero |
 
 ## `anytime_pparam_update_enactment.py` — runs continuously, including under faults
 

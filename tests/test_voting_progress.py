@@ -1,4 +1,4 @@
-"""Leios submission stalls and Conway gating."""
+"""Leios submission stalls, independent recovery and Conway gating."""
 
 from __future__ import annotations
 
@@ -93,6 +93,89 @@ class BoundedVoting(unittest.TestCase):
             self.assertTrue(path.exists())
             with path.open("a") as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+class Recovery(unittest.TestCase):
+    def setUp(self):
+        self.voter = mock.Mock()
+        self.cluster = mock.Mock()
+        self.cluster.g_query.get_epoch.return_value = 1
+        self.cluster.g_query.get_slot_no.return_value = 1
+        self.sdk = mock.Mock()
+        for patch in (
+            mock.patch.object(p.g, "GOV_COMMAND_ERA", "dijkstra"),
+            mock.patch.object(p.g, "SETUP_MARKER", mock.Mock(exists=lambda: True)),
+            mock.patch.object(p, "make_cluster", return_value=self.cluster),
+            mock.patch.object(p, "recovery_limits", return_value=(2, 100)),
+            mock.patch.object(p.importlib, "import_module", return_value=self.voter),
+            mock.patch.object(p, "sdk", self.sdk),
+            mock.patch.object(p.time, "sleep"),
+        ):
+            patch.start()
+            self.addCleanup(patch.stop)
+        self.prop = {
+            "expiresAfter": 2,
+            "proposalProcedure": {"govAction": {"tag": "ParameterChange"}},
+            "dRepVotes": {str(i): "VoteYes" for i in range(5)},
+            "committeeVotes": {"cc": "VoteNo"},
+            "stakePoolVotes": {},
+        }
+
+    def test_recovery_retries_unavailable_then_empty_queries_before_real_votes(self):
+        with mock.patch.object(
+            p.g,
+            "live_info_actions",
+            side_effect=[
+                OSError("fault"),
+                [],
+                [{**self.prop, "stakePoolVotes": {"spo": "VoteAbstain"}}],
+            ],
+        ):
+            self.assertEqual(p.recover("info"), 0)
+        self.assertEqual(self.voter.main.call_count, 3)
+        self.sdk.sometimes.assert_any_call(False, "actions_live", {"live": 0})
+        self.sdk.sometimes.assert_any_call(True, "actions_live", {"live": 1})
+
+    def test_submission_success_without_recorded_votes_cannot_finish_recovery(self):
+        empty = {**self.prop, "dRepVotes": {}, "committeeVotes": {}}
+        self.cluster.g_query.get_gov_state.return_value = {"proposals": [empty]}
+        self.assertEqual(p.recover("pparam"), 0)
+        self.assertEqual(self.voter.main.call_count, 3)
+
+    def test_expired_majority_does_not_finish_recovery(self):
+        self.cluster.g_query.get_gov_state.side_effect = [
+            {"proposals": [{**self.prop, "expiresAfter": 0}]},
+            {"proposals": [self.prop]},
+        ]
+        self.assertEqual(p.recover("pparam"), 0)
+        self.assertEqual(self.voter.main.call_count, 2)
+
+    def test_conway_does_not_run_new_recovery_or_query_anything(self):
+        with mock.patch.object(p.g, "GOV_COMMAND_ERA", "conway"):
+            self.assertEqual(p.recover("info"), 0)
+            self.assertEqual(p.recover("pparam"), 0)
+        self.voter.main.assert_not_called()
+        self.cluster.g_query.get_gov_state.assert_not_called()
+
+    def test_submission_waits_are_included_in_the_slot_budget(self):
+        self.cluster.g_query.get_slot_no.side_effect = [100, 200]
+        self.cluster.g_query.get_gov_state.return_value = {"proposals": []}
+        self.assertEqual(p.recover("pparam"), 0)
+        self.voter.main.assert_called_once()
+
+    def test_a_fully_stalled_chain_has_a_small_step_limit(self):
+        self.cluster.g_query.get_gov_state.return_value = {"proposals": []}
+        with mock.patch.object(p, "recovery_limits", return_value=(240, 6000)):
+            self.assertEqual(p.recover("pparam"), 0)
+        self.assertEqual(self.voter.main.call_count, p.MAX_STALLED_STEPS)
+
+    def test_unavailable_tip_does_not_wait_through_hundreds_of_voter_invocations(self):
+        self.cluster.g_query.get_slot_no.side_effect = OSError("socket unavailable")
+        with mock.patch.object(p, "recovery_limits", return_value=(240, 6000)):
+            self.assertEqual(p.recover("info"), 0)
+        self.voter.main.assert_not_called()
+        self.assertEqual(self.cluster.g_query.get_slot_no.call_count, p.MAX_STALLED_STEPS)
+        self.sdk.sometimes.assert_any_call(False, "action_majority_reached")
 
 
 if __name__ == "__main__":

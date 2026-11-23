@@ -186,6 +186,43 @@ class ParameterVoting(unittest.TestCase):
         assert voter.main() == 0
         self.sdk.sometimes.assert_any_call(False, "pparam_update_vote_recorded_drep")
 
+    def test_leios_voter_supplies_its_target_without_a_creator_command(self) -> None:
+        self.cluster.g_query.get_gov_state.side_effect = [
+            {"proposals": []},
+            {"proposals": [self.prop]},
+            {"proposals": [self.prop]},
+        ]
+        with (
+            mock.patch.object(voter.progress, "enabled", return_value=True),
+            mock.patch.object(voter.progress, "make_cluster", return_value=self.cluster),
+            mock.patch.object(voter.creator, "create", return_value="target") as create,
+        ):
+            assert voter.main() == 0
+        create.assert_called_once()
+        self.assert_majority()
+
+    def test_conway_empty_queue_does_not_trigger_new_supply_path(self) -> None:
+        self.cluster.g_query.get_gov_state.return_value = {"proposals": []}
+        with (
+            mock.patch.object(voter.progress, "enabled", return_value=False),
+            mock.patch.object(voter.creator, "create") as create,
+        ):
+            assert voter.main() == 0
+        create.assert_not_called()
+
+    def test_malformed_empty_queue_cannot_trigger_leios_supply(self) -> None:
+        for proposals in ({}, None):
+            with (
+                self.subTest(proposals=proposals),
+                mock.patch.object(voter.progress, "enabled", return_value=True),
+                mock.patch.object(voter.progress, "make_cluster", return_value=self.cluster),
+                mock.patch.object(voter.creator, "create") as create,
+            ):
+                self.cluster.g_query.get_gov_state.return_value = {"proposals": proposals}
+                assert voter.main() == 0
+                create.assert_not_called()
+        self.submit.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
