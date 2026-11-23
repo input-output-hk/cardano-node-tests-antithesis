@@ -91,6 +91,12 @@ same missing-credential batch. Expired proposals are excluded using the
 current epoch. Missing or unavailable queries remain unknown: they cannot
 trigger creation or count as an empty/live queue.
 
+On Leios, CLI calls have a 20-second process-group deadline and transaction
+inclusion is polled at most twelve times, five seconds apart, instead of
+waiting for new blocks under faults. These bounds apply only to these voting
+steps; Conway retains its existing clusterlib submission path. Inclusion of a
+transaction alone never supplies live-action or recorded-vote evidence.
+
 | Assertion | Type | Meaning |
 |---|---|---|
 | `vote entered` | Reachable | driver ran |

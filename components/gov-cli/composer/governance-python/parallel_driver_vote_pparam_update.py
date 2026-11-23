@@ -28,6 +28,7 @@ import sys
 
 import helper_gov as g
 import helper_sdk as sdk
+import helper_voting_progress as progress
 from cardano_clusterlib import clusterlib
 
 
@@ -193,7 +194,7 @@ def main() -> int:
         if addr is None:
             return 0
         try:
-            cluster = g.make_cluster()
+            cluster = progress.make_cluster()
             if not g.wait_for_node(cluster, tries=30):
                 sdk.unreachable("vote_pparam_update_node_not_ready")
                 return 0
