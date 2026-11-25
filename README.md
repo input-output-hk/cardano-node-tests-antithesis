@@ -68,6 +68,17 @@ only that public address to [Koios](https://www.koios.rest/api.html#post-/addres
 and never signs, transfers funds, or requests an Antithesis run. An unavailable
 balance query is reported as unavailable, not as zero.
 
+## Automated evidence collection
+
+The Antithesis workflow saves accessible report properties and examples as a
+sanitized artifact. **Collect Antithesis evidence** then adds completed GitHub
+log excerpts and run provenance. This is the first stage of automated triage;
+it does not call an AI model, create issues/PRs, change test results, or launch
+paid runs. Missing or restricted evidence is explicitly recorded.
+
+See [the collector guide](docs/antithesis-evidence.md) for artifact contents,
+limitations, and replaying a previous run locally.
+
 ## Upstreams
 
 Two Cardano Foundation repos are load-bearing here but appear only as a workflow flag and as image

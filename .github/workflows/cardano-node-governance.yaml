@@ -335,8 +335,12 @@ jobs:
         # (see scripts/wait-for-test.sh). Strip C0 control characters
         # before parsing.
         RESULT=$(moog facts test-runs --test-run-id "${{ steps.request.outputs.id }}" | tr -d '\000-\037')
-        OUTCOME=$(echo "$RESULT" | jq -r '.[0].value.outcome // "unknown"')
-        URL=$(echo "$RESULT" | jq -r '.[0].value.url // empty')
+        # Private handoff to the bounded collector below. Never upload these
+        # facts: the report URL contains a bearer credential.
+        umask 077
+        printf '%s' "$RESULT" > "$RUNNER_TEMP/antithesis-result.json"
+        OUTCOME=$(echo "$RESULT" | jq -r '(if type == "array" then .[0] else . end).value.outcome // "unknown"')
+        URL=$(echo "$RESULT" | jq -r '(if type == "array" then .[0] else . end).value.url // empty')
         echo "outcome: $OUTCOME"
 
         # Read back from the actual committed docker-compose.yaml (same
@@ -347,6 +351,7 @@ jobs:
         # Storage runs have been flattened after mode selection, so their
         # values are literals rather than ${VAR:-default} expressions.
         CONFIG=$(docker compose -f "$COMPOSE" config --format json)
+        printf '%s' "$CONFIG" > "$RUNNER_TEMP/antithesis-compose.json"
         NODE_IMG=$(jq -r '.services.p1.image' <<< "$CONFIG")
         PROTOCOL_VER=$(jq -r '.services["gov-configurator"].environment.PROTOCOL_VERSION' <<< "$CONFIG")
         CMD_ERA=$(jq -r '.services["gov-cli"].environment.GOV_COMMAND_ERA' <<< "$CONFIG")
@@ -372,3 +377,31 @@ jobs:
           echo "- gov-configurator: \`$GOV_CONFIGURATOR_IMG\`"
           echo "- tx-firehose: \`$TX_FIREHOSE_IMG\`"
         } >> "$GITHUB_STEP_SUMMARY"
+
+    # Best-effort collection cannot change the paid test's outcome. A separate
+    # workflow adds the completed GitHub logs without any wallet credentials.
+    - name: Collect accessible report evidence
+      if: always()
+      continue-on-error: true
+      timeout-minutes: 6
+      env:
+        EVIDENCE_REQUEST_ID: ${{ steps.request.outputs.id }}
+        EVIDENCE_TESTED_COMMIT: ${{ steps.leios-patch.outputs.sha || steps.pin.outputs.sha || github.sha }}
+        EVIDENCE_MODE: ${{ steps.mode.outputs.mode || 'unknown' }}
+      run: |
+        python3 scripts/collect-antithesis-evidence.py report \
+          --facts "$RUNNER_TEMP/antithesis-result.json" \
+          --compose "$RUNNER_TEMP/antithesis-compose.json" \
+          --output "$RUNNER_TEMP/antithesis-report-evidence"
+
+    - name: Save sanitized report evidence
+      if: always()
+      continue-on-error: true
+      uses: actions/upload-artifact@v4
+      with:
+        name: antithesis-report-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+        path: |
+          ${{ runner.temp }}/antithesis-report-evidence/evidence.json
+          ${{ runner.temp }}/antithesis-report-evidence/summary.md
+        if-no-files-found: warn
+        retention-days: 30

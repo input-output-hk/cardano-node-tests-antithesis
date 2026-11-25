@@ -1,0 +1,58 @@
+name: Collect Antithesis evidence
+
+on:
+  workflow_run:
+    workflows: [Antithesis]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Completed Antithesis GitHub run ID (does not launch a test)"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  collect:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Always execute the collector from the trusted default branch, never
+      # code from a downloaded artifact or the triggering run's checkout.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Collect completed run evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.run_id || github.event.workflow_run.id }}
+          SOURCE_ATTEMPT: ${{ github.event.workflow_run.run_attempt || '' }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [[ -n "$SOURCE_ATTEMPT" ]]; then
+            args+=(--expected-attempt "$SOURCE_ATTEMPT")
+          fi
+          python3 scripts/collect-antithesis-evidence.py finalize \
+            --github-run-id "$SOURCE_RUN_ID" "${args[@]}" \
+            --output "$RUNNER_TEMP/antithesis-evidence"
+          cat "$RUNNER_TEMP/antithesis-evidence/summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save evidence for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: antithesis-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/antithesis-evidence/evidence.json
+            ${{ runner.temp }}/antithesis-evidence/summary.md
+          if-no-files-found: error
+          retention-days: 30
