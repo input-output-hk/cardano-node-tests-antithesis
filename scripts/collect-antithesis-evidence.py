@@ -453,8 +453,147 @@ def zip_member(data: bytes, name: str):
         return json.loads(archive.read(matches[0]))
 
 
+def log_steps(lines):
+    """Separate rendered shell/env headers from their actual stdout.
+
+    Never treat an echoed shell command or Moog's historical fact dump as
+    a current result. This only supports the runner's explicit Run groups.
+    """
+    step = None
+    phase = "script"
+    for number, line in enumerate(lines, 1):
+        text = ANSI.sub("", line)
+        text = re.sub(r"^\d{4}-\d\d-\d\dT[\d:.]+Z ", "", text)
+        if text.startswith("##[group]"):
+            if step is not None:
+                yield step
+            step = (
+                {"script": [], "env": [], "output": []}
+                if text.startswith("##[group]Run ")
+                else None
+            )
+            phase = "script"
+        elif step is not None:
+            if text == "##[endgroup]":
+                phase = "output"
+            elif phase != "output" and text.startswith("shell: "):
+                phase = "runner"
+            elif phase == "runner" and text == "env:":
+                phase = "env"
+            elif phase in step:
+                step[phase].append((number, text))
+    if step is not None:
+        yield step
+
+
+def log_metadata(lines, filename):
+    """Return only allowlisted values with locations, not raw env/JSON dumps."""
+    if not (
+        re.fullmatch(r"\d+_run-cardano-node-governance\.txt", filename)
+        or (
+            filename.startswith("run-cardano-node-governance/")
+            and not filename.endswith("/system.txt")
+        )
+    ):
+        return {}
+    candidates = {}
+
+    def add(field, value, number, kind, request_id=None):
+        candidate = {"value": value, "file": filename, "line": number, "kind": kind}
+        if request_id:
+            candidate["request_id"] = request_id
+        candidates.setdefault(field, []).append(candidate)
+
+    for step in log_steps(lines):
+        script = "\n".join(text for _, text in step["script"])
+        if 'echo "mode=$MODE" >> "$GITHUB_OUTPUT"' in script:
+            for number, text in step["env"]:
+                match = re.fullmatch(r"  MODE: (conway|leios|leios-latest)", text)
+                if match:
+                    add("mode", match[1], number, "mode_step_environment")
+        if 'requester create-test -d "$TESTNET"' in script and '-c "$COMMIT"' in script:
+            commits = [
+                (number, re.fullmatch(r'COMMIT="([0-9a-f]{40})"', text))
+                for number, text in step["script"]
+            ]
+            commits = [(number, match[1]) for number, match in commits if match]
+            ready = False
+            for number, text in step["output"]:
+                if re.fullmatch(r"TRY=\d+ for testnets/cardano_node_governance", text):
+                    ready = True
+                if not ready or not text.startswith("{"):
+                    continue
+                try:
+                    response = json.loads(text)
+                    request_id = response["value"]["testRunId"]
+                    txhash = response["txHash"]
+                    if not (
+                        isinstance(request_id, str)
+                        and re.fullmatch(r"[0-9a-f]{64}", request_id)
+                        and isinstance(txhash, str)
+                        and re.fullmatch(r"[0-9a-f]{64}", txhash)
+                    ):
+                        continue
+                except (ValueError, KeyError, TypeError):
+                    continue
+                add("request_id", request_id, number, "create_test_response")
+                for commit_line, commit in commits:
+                    add(
+                        "tested_commit",
+                        commit,
+                        commit_line,
+                        "create_test_commit_parameter",
+                        request_id,
+                    )
+        if 'echo "outcome: $OUTCOME"' in script:
+            queries = [
+                (number, re.search(r'facts test-runs --test-run-id "([0-9a-f]{64})"', text))
+                for number, text in step["script"]
+            ]
+            queries = [(number, match[1]) for number, match in queries if match]
+            if len({value for _, value in queries}) != 1:
+                continue
+            for number, text in step["output"]:
+                match = re.fullmatch(r"outcome: (success|failure|unknown)", text)
+                if match:
+                    query_line, request_id = queries[0]
+                    add("request_id", request_id, query_line, "result_query_parameter")
+                    add("outcome", match[1], number, "result_step_stdout", request_id)
+    return candidates
+
+
+def apply_log_metadata(bundle):
+    test = bundle["test"]
+    candidates = bundle["github_logs"].get("metadata_candidates", {})
+    sources = test.setdefault("field_sources", {})
+    for field in ("request_id", "mode", "tested_commit", "outcome"):
+        observations = candidates.get(field, [])
+        if field in ("tested_commit", "outcome"):
+            request_id = test.get("request_id")
+            observations = [
+                x for x in observations if request_id and x.get("request_id") == request_id
+            ]
+        values = {x["value"] for x in observations}
+        current = test.get(field)
+        if len(values) > 1:
+            bundle["gaps"].append(
+                f"Conflicting GitHub log values for {field}; no fallback value selected"
+            )
+        elif values:
+            value = next(iter(values))
+            if current not in (None, "", "unknown"):
+                if current != value:
+                    bundle["gaps"].append(
+                        f"GitHub logs disagree with structured {field}; kept the artifact value"
+                    )
+                continue
+            test[field] = value
+            sources[field] = {"source": "github_logs", "evidence": observations}
+
+
 def github_logs(data: bytes):
     excerpts = []
+    candidates = {}
     total = 0
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
         if len(archive.infolist()) > 1000:
@@ -466,6 +605,8 @@ def github_logs(data: bytes):
             if entry.is_dir():
                 continue
             lines = archive.read(entry).decode(errors="replace").splitlines()
+            for field, observations in log_metadata(lines, entry.filename).items():
+                candidates.setdefault(field, []).extend(observations)
             for number, line in enumerate(lines, 1):
                 if not re.search(
                     r"##\[error\]|outcome: (success|failure|unknown)|Process completed with exit|Error:|timed out|giving up|still pending",
@@ -483,6 +624,7 @@ def github_logs(data: bytes):
         "status": "collected",
         "selection": "bounded diagnostic excerpts only; full logs are not included",
         "excerpts": excerpts[-200:],
+        "metadata_candidates": candidates,
     }
 
 
@@ -582,7 +724,7 @@ def finalize(args):
     )
     if seed is None:
         gaps.append(
-            "Antithesis evidence unavailable; GitHub workflow failure is not a node failure diagnosis"
+            "Antithesis report properties are unavailable; workflow/run failure alone does not identify a node defect"
         )
     bundle["github"] = {
         "repository": repository,
@@ -600,6 +742,7 @@ def finalize(args):
             else api(f"actions/runs/{run_id}/attempts/{attempt}/logs", binary=True)
         )
         bundle["github_logs"] = github_logs(data)
+        apply_log_metadata(bundle)
     except (EvidenceError, OSError, ValueError, zipfile.BadZipFile) as exc:
         bundle["github_logs"] = {"status": "unavailable"}
         bundle["gaps"].append(
@@ -617,6 +760,7 @@ def write_bundle(bundle, output):
         "# Antithesis evidence (no AI diagnosis)",
         "",
         f"- GitHub run: {bundle['github'].get('run_id', 'unknown')}, attempt {bundle['github'].get('run_attempt', 'unknown')}",
+        f"- Moog request: {bundle.get('test', {}).get('request_id', 'unknown')}",
         f"- Mode: {bundle.get('test', {}).get('mode', 'unknown')}",
         f"- Antithesis outcome: {bundle.get('test', {}).get('outcome', 'unknown')}",
         f"- Tested commit: {bundle.get('test', {}).get('tested_commit', 'unknown')}",
@@ -629,6 +773,14 @@ def write_bundle(bundle, output):
     for prop in nonpassing:
         label = html.escape(str(prop.get("group_id") or prop["property_id"])).replace("\n", " ")
         lines.append(f"- {label}")
+    sources = bundle.get("test", {}).get("field_sources", {})
+    if sources:
+        lines += ["", "Recovered metadata sources:"]
+        for field, source in sources.items():
+            for point in source.get("evidence", []):
+                lines.append(
+                    f"- {field}: GitHub log {html.escape(point['file'])}, line {point['line']} ({point['kind']})"
+                )
     lines += ["", "Evidence gaps:"] + ["- " + html.escape(str(gap)) for gap in bundle["gaps"]]
     (output / "summary.md").write_text("\n".join(lines) + "\n")
 

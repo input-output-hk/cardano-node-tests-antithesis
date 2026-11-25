@@ -26,7 +26,8 @@ images, genesis parameters, assertion requirements, and scheduling are unchanged
 
 The follow-up can also be dispatched manually with a **completed GitHub run ID**.
 For older runs without a report artifact, it collects GitHub metadata and
-diagnostic excerpts only. It cannot retrieve an old signed URL from the job
+diagnostic excerpts, and recovers explicit test metadata from supported runner
+log entries. It cannot retrieve an old signed URL from the job
 summary automatically. Use the local report command below when you have one.
 
 ## Bundle contents and limitations
@@ -40,6 +41,17 @@ summary automatically. Use the local report command below when you have one.
 - Matching property records, counts and up to five examples/counterexamples
   of each kind, including embedded moment/session/input-hash information.
 - Bounded GitHub diagnostic excerpts and explicit evidence gaps.
+
+When structured fields are missing, the collector can recover the selected
+mode from the mode step's runner environment, the full commit supplied to
+`create-test` after a successful request response, the request ID, and the
+result step's actual `outcome:` output. It does not infer outcomes from exit
+codes, parse historical Moog facts as current results, or use the workflow
+head SHA as a substitute for the patched test commit. Each recovered field
+has file/line provenance in `test.field_sources` and the Markdown summary.
+Conflicting candidates stay unknown; structured artifact values take precedence
+and disagreements are recorded. Outcome/commit candidates must belong to the
+same request ID. Metadata recovery cannot manufacture missing property records.
 
 The HTML report bundles historical runs. Properties must match the exact Moog
 request ID, repository and tested commit; there is no "latest run" fallback.

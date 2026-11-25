@@ -68,6 +68,32 @@ def archive(files):
     return output.getvalue()
 
 
+def shell_step(script, output="", env=""):
+    return f"##[group]Run test\n{script}\nshell: /usr/bin/bash -e {{0}}\nenv:\n{env}\n##[endgroup]\n{output}\n"
+
+
+def legacy_logs(
+    mode="leios", commit="c" * 40, request_id="b" * 64, outcome="failure", submitted=True
+):
+    response = json.dumps(
+        {"txHash": "e" * 64, "value": {"testRunId": request_id}, "wallet": "PRIVATE_MARKER"}
+    )
+    return (
+        shell_step(
+            'echo "mode=$MODE" >> "$GITHUB_OUTPUT"',
+            env=f"  MODE: {mode}\n  API_KEY: PRIVATE_MARKER",
+        )
+        + shell_step(
+            f'COMMIT="{commit}"\nRESULT=$(moog requester create-test -d "$TESTNET" -c "$COMMIT")',
+            output="TRY=1 for testnets/cardano_node_governance\n" + (response if submitted else ""),
+        )
+        + shell_step(
+            f'RESULT=$(moog facts test-runs --test-run-id "{request_id}")\necho "outcome: $OUTCOME"',
+            output=f"outcome: {outcome}",
+        )
+    )
+
+
 class ReportEvidence(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -439,6 +465,118 @@ class FinalEvidence(unittest.TestCase):
         self.assertEqual(result["report"]["status"], "extracted_partial")
         self.assertEqual(result["github_logs"]["status"], "collected")
         self.assertFalse(any("/artifacts/77/" in url for url in calls))
+
+
+class LegacyMetadataFallback(unittest.TestCase):
+    def finalize(self, logs, seed=None, filename="0_run-cardano-node-governance.txt"):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "run.json").write_text(json.dumps(RUN))
+            (root / "logs.zip").write_bytes(archive({filename: logs}))
+            if seed:
+                (root / "seed.json").write_text(json.dumps(seed))
+            return e.finalize(
+                argparse.Namespace(
+                    repository="org/repo",
+                    github_run_json=root / "run.json",
+                    github_run_id=None,
+                    expected_attempt=2,
+                    seed=root / "seed.json" if seed else None,
+                    github_logs_zip=root / "logs.zip",
+                )
+            )
+
+    def test_metadata_is_recovered_with_sources_but_properties_remain_unavailable(self):
+        result = self.finalize(legacy_logs())
+        for field, expected in {
+            "mode": "leios",
+            "tested_commit": "c" * 40,
+            "outcome": "failure",
+            "request_id": "b" * 64,
+        }.items():
+            self.assertEqual(result["test"][field], expected)
+            source = result["test"]["field_sources"][field]
+            self.assertEqual(source["source"], "github_logs")
+            self.assertTrue(all(p["line"] > 0 for p in source["evidence"]))
+        self.assertNotEqual(result["test"]["tested_commit"], result["github"]["head_sha"])
+        self.assertEqual(result["properties"], [])
+        self.assertEqual(result["report"]["status"], "unavailable")
+        self.assertNotIn("PRIVATE_MARKER", json.dumps(result))
+
+    def test_all_supported_modes_are_explicit_not_defaulted(self):
+        for mode in ("conway", "leios", "leios-latest"):
+            self.assertEqual(self.finalize(legacy_logs(mode=mode))["test"]["mode"], mode)
+        self.assertEqual(self.finalize(legacy_logs(mode="invalid"))["test"]["mode"], "unknown")
+
+    def test_quoted_commands_and_historical_json_cannot_supply_an_outcome(self):
+        logs = shell_step(
+            'echo "outcome: failure"\necho "outcome: $OUTCOME"',
+            output='echo "outcome: failure"\n{"outcome":"failure"}',
+            env="  MODE: leios",
+        )
+        result = self.finalize(logs)
+        self.assertEqual(result["test"]["outcome"], "unknown")
+        self.assertEqual(result["test"]["mode"], "unknown")
+
+    def test_commit_without_created_request_is_not_claimed_as_tested(self):
+        result = self.finalize(legacy_logs(submitted=False))
+        self.assertEqual(result["test"]["outcome"], "failure")
+        self.assertFalse(result["test"].get("tested_commit"))
+
+    def test_short_commit_hash_cannot_fall_back_to_workflow_head(self):
+        result = self.finalize(legacy_logs(commit="c" * 7))
+        self.assertFalse(result["test"].get("tested_commit"))
+
+    def test_historical_facts_before_current_try_are_ignored(self):
+        old = json.dumps({"txHash": "e" * 64, "value": {"testRunId": "d" * 64}})
+        logs = legacy_logs().replace("TRY=1 for", old + "\nTRY=1 for")
+        result = self.finalize(logs)
+        self.assertEqual(result["test"]["request_id"], "b" * 64)
+        self.assertEqual(result["test"]["tested_commit"], "c" * 40)
+
+    def test_different_created_and_queried_requests_leave_outcome_unknown(self):
+        logs = legacy_logs().replace('--test-run-id "' + "b" * 64, '--test-run-id "' + "d" * 64)
+        result = self.finalize(logs)
+        self.assertEqual(result["test"]["outcome"], "unknown")
+        self.assertFalse(result["test"].get("tested_commit"))
+        self.assertTrue(any("Conflicting" in x for x in result["gaps"]))
+
+    def test_conflicting_report_outcomes_are_not_chosen_by_order(self):
+        result = self.finalize(legacy_logs() + "outcome: success\n")
+        self.assertEqual(result["test"]["outcome"], "unknown")
+        self.assertTrue(any("Conflicting" in x for x in result["gaps"]))
+
+    def test_structured_artifact_values_take_precedence_with_conflict_noted(self):
+        seed = {
+            "schema_version": 1,
+            **CONTEXT,
+            "properties": [],
+            "gaps": [],
+            "report": {"status": "extracted_partial"},
+        }
+        seed["test"] = CONTEXT["test"] | {"mode": "conway", "outcome": "success"}
+        result = self.finalize(legacy_logs(), seed=seed)
+        self.assertEqual(result["test"]["mode"], "conway")
+        self.assertEqual(result["test"]["outcome"], "success")
+        self.assertTrue(any("disagree" in x for x in result["gaps"]))
+
+    def test_unrelated_job_logs_cannot_fill_metadata(self):
+        result = self.finalize(legacy_logs(), filename="1_other-job.txt")
+        self.assertEqual(result["test"]["outcome"], "unknown")
+        self.assertEqual(result["test"]["mode"], "unknown")
+
+    def test_log_outcome_for_a_different_artifact_request_cannot_fill_unknown_outcome(self):
+        seed = {
+            "schema_version": 1,
+            **CONTEXT,
+            "properties": [],
+            "gaps": [],
+            "report": {"status": "extracted_partial"},
+        }
+        result = self.finalize(legacy_logs(request_id="d" * 64), seed=seed)
+        self.assertEqual(result["test"]["request_id"], "b" * 64)
+        self.assertNotIn("outcome", result["test"])
+        self.assertTrue(any("disagree" in x for x in result["gaps"]))
 
 
 if __name__ == "__main__":
