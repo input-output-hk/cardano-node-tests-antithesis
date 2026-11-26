@@ -79,6 +79,10 @@ paid runs. Missing or restricted evidence is explicitly recorded.
 See [the collector guide](docs/antithesis-evidence.md) for artifact contents,
 limitations, and replaying a previous run locally.
 
+An optional, manually triggered [Copilot POC](docs/antithesis-copilot-poc.md)
+analyzes an existing run using a personal Copilot allowance. It only saves an
+unverified report artifact; it cannot create issues/PRs or launch paid tests.
+
 ## Upstreams
 
 Two Cardano Foundation repos are load-bearing here but appear only as a workflow flag and as image

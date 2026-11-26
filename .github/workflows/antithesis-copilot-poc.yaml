@@ -1,0 +1,111 @@
+name: Antithesis Copilot POC
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Completed Antithesis run ID to analyze (no paid run is launched)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: antithesis-copilot-poc
+  cancel-in-progress: false
+
+jobs:
+  analyze:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Check personal Copilot credential
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_POC_TOKEN }}
+        run: |
+          if [[ -z "$COPILOT_GITHUB_TOKEN" ]]; then
+            echo 'Add COPILOT_POC_TOKEN: a personal fine-grained token with Copilot Requests permission.'
+            exit 1
+          fi
+
+      - name: Collect existing run evidence
+        id: evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.run_id }}
+        run: |
+          set -euo pipefail
+          python3 scripts/collect-antithesis-evidence.py finalize \
+            --github-run-id "$SOURCE_RUN_ID" \
+            --output "$RUNNER_TEMP/copilot-evidence"
+          python3 - <<'PY'
+          import json, os, pathlib, re
+          bundle = json.loads((pathlib.Path(os.environ['RUNNER_TEMP']) / 'copilot-evidence/evidence.json').read_text())
+          sha = bundle.get('test', {}).get('tested_commit', '')
+          sha = sha if isinstance(sha, str) and re.fullmatch(r'[0-9a-f]{40}', sha) else ''
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
+              stream.write(f'tested_commit={sha}\n')
+          PY
+
+      # Read sources from the tested commit, never execute its code or hooks.
+      - uses: actions/checkout@v6
+        if: steps.evidence.outputs.tested_commit != ''
+        continue-on-error: true
+        with:
+          ref: ${{ steps.evidence.outputs.tested_commit }}
+          path: tested-source
+          persist-credentials: false
+          submodules: false
+          lfs: false
+
+      - name: Prepare bounded analysis context
+        run: |
+          python3 scripts/antithesis-copilot-poc.py prepare \
+            --evidence "$RUNNER_TEMP/copilot-evidence/evidence.json" \
+            --source "$GITHUB_WORKSPACE/tested-source" \
+            --output "$RUNNER_TEMP/copilot-analysis"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Install pinned Copilot CLI
+        run: npm install --global --ignore-scripts @github/copilot@1.0.116
+
+      - name: Analyze once using personal Copilot allowance
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_POC_TOKEN }}
+        run: |
+          python3 scripts/antithesis-copilot-poc.py run \
+            --output "$RUNNER_TEMP/copilot-analysis"
+
+      - name: Archive POC report and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: antithesis-copilot-poc-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/copilot-evidence/evidence.json
+            ${{ runner.temp }}/copilot-evidence/summary.md
+            ${{ runner.temp }}/copilot-analysis/analysis.md
+            ${{ runner.temp }}/copilot-analysis/status.md
+            ${{ runner.temp }}/copilot-analysis/context.json
+            ${{ runner.temp }}/copilot-analysis/usage.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Report POC status
+        if: always()
+        run: |
+          if [[ -f "$RUNNER_TEMP/copilot-analysis/status.md" ]]; then
+            cat "$RUNNER_TEMP/copilot-analysis/status.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo 'Download the POC artifact to review the unverified analysis and usage. No issue, PR or paid run was created.' >> "$GITHUB_STEP_SUMMARY"
