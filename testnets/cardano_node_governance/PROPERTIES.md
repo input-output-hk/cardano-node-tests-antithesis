@@ -242,6 +242,7 @@ do not add queries or change the accounting predicates or coverage requirements.
 | `treasury_withdrawal_setup_failed` | **AlwaysOrUnreachable** | guided payout preparation exhausted retries or failed; setup cannot complete |
 | `treasury_withdrawal_enactment entered` | Reachable | checker ran |
 | `treasury_withdrawal_query_unavailable` | Sometimes | retryable query/snapshot failure; no claim is resolved from unavailable state |
+| `treasury_withdrawal_query_progress` | Sometimes, optional; Leios observers only | query name, immutable/volatile target, start/finish phase and remaining query budget; diagnostic only |
 | `treasury_withdrawal_slot_reclaimed_after_abandonment` | Sometimes | a funds-receiving claim outlived a create-driver process that died mid-submit, and was self-healed |
 | `treasury_withdrawal_ratified` | Sometimes | the ledger reports a tracked treasury action ratified at the immutable tip |
 | `treasury_withdrawal_enacted_correctly` | Sometimes | an immutable, terminal withdrawal's recipient balance increased by exactly the transferred amount |
@@ -269,11 +270,28 @@ setup observes the guided action's immutable ratification and waits until its
 settlement boundary is at most two genesis-derived confirmation windows away
 before releasing faults. If optional setup already crossed settlement, an exact
 fresh immutable payout read is required instead. The terminal Leios budget is
-four confirmation windows (20 minutes at production k), including immutable
-confirmation and retry overhead. This keeps enactment reachable within a short
-terminal branch without changing k, epoch length, votes, or accounting checks.
-Quiet recovery backs off between epoch observations after ratification; query
-failures keep the short retry path. Production k and epoch timing are unchanged.
+four confirmation windows of settlement wait (20 minutes at production k), plus
+a separate query allowance of the same size. This keeps enactment reachable
+within a bounded terminal branch without changing k, epoch length, votes, or
+accounting checks.
+Quiet recovery backs off between epoch observations after ratification. Leios
+polls no faster than one quarter of its settlement window, including after query
+failures. Production k and epoch timing are unchanged.
+Leios continuous and terminal observers use finite CLI queries (at most five
+seconds, then a two-second kill grace, with a further process guard). They make
+one CLI attempt per query; retrying belongs to the observation loop. The source
+cluster used for submissions and Conway's CLI path are unchanged.
+
+Leios recovery reserves the maximum possible query duration **before each
+query**, including its process guards. Query work and settlement sleeps each
+have a finite four-window allowance: at most 40 minutes combined at production
+k. Successful queries cannot spend the wait needed for immutable settlement.
+Fast queries do not earn their reservation back. The shorter
+deadline for accelerated local genesis windows leaves room for repeated
+snapshots. An exhausted query budget is unavailable evidence, never a zero
+balance or a resolved claim. This bounds failed-query overhead that a sleep-only
+counter misses. Exact-payout, ratification, overpayment and command-exit
+assertions retain their existing requirements.
 Other terminal commands may be selected on other timelines; this command is a
 separate treasury recovery path, not a guarantee that every timeline settles.
 

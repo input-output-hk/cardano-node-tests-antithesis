@@ -16,6 +16,7 @@ import anytime_treasury_withdrawal_enactment as checker
 import helper_gov as g
 import helper_sdk as sdk
 import helper_treasury as treasury
+import helper_treasury_queries as queries
 import helper_treasury_recovery as recovery
 
 POLL_SECONDS = 5
@@ -28,10 +29,11 @@ def main() -> int:
         return 0
     sdk.sometimes(False, "treasury_withdrawal_ratified")
     sdk.sometimes(False, "treasury_withdrawal_enacted_correctly")
-    cluster = g.make_cluster()
     # A counter bounds elapsed sleep even if the node stops advancing slots.
     # Derive the budget from genesis; no change to k or production epoch timing.
     window = recovery.leios_window()
+    budget = queries.QueryBudget(window[1]) if window else None
+    cluster = treasury.observer_cluster(budget=budget)
     remaining_seconds = (
         window[1] if window else RECOVERY_EPOCHS * cluster.epoch_length * cluster.slot_length
     )
@@ -62,9 +64,19 @@ def main() -> int:
             observation.clear()
             print(f"treasury recovery snapshot unavailable: {exc}", file=sys.stderr)
             sdk.sometimes(True, "treasury_withdrawal_query_unavailable")
-        if attempt == checks or remaining_seconds <= 0:
+        if (
+            attempt == checks
+            or remaining_seconds <= 0
+            or (budget is not None and budget.remaining < budget.query_seconds + 3)
+        ):
             break
-        delay = min(remaining_seconds, recovery.poll_seconds(cluster, observation))
+        poll = recovery.poll_seconds(cluster, observation)
+        if window:
+            # Keep the full settlement wait: successful queries must not spend
+            # the time needed for the next epoch to become immutable. Bound
+            # query work separately, with at most four regular poll intervals.
+            poll = max(poll, window[1] / 4)
+        delay = min(remaining_seconds, poll)
         time.sleep(delay)
         remaining_seconds -= delay
     sdk.always(

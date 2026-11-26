@@ -129,7 +129,7 @@ def main() -> int:
     # Natural expiry can outlive the production three-hour budget. Keep the
     # observation visible without requiring an impossible coverage hit.
     sdk.sometimes(False, "treasury_withdrawal_resolved_without_payout", must_hit=False)
-    cluster = g.make_cluster()
+    cluster = treasury.observer_cluster()
     with treasury.lock() as locked:
         if not locked:
             return 0

@@ -14,10 +14,25 @@ import json
 
 import helper_gov as g
 import helper_sdk as sdk
+import helper_treasury_queries as queries
 from cardano_clusterlib import clusterlib
 
 GUIDED_RECEIVER = 1
 EXPIRY_RECEIVER = 2
+
+
+def observer_cluster(*, budget: queries.QueryBudget | None = None) -> clusterlib.ClusterLib:
+    """Bound Leios observation only; preserve Conway and submission behavior."""
+    cluster = g.make_cluster()
+    if g.GOV_COMMAND_ERA != "dijkstra":
+        return cluster
+    return queries.bounded(
+        cluster,
+        budget=budget,
+        progress=lambda details: sdk.sometimes(
+            True, "treasury_withdrawal_query_progress", details, must_hit=False
+        ),
+    )
 
 
 @contextlib.contextmanager

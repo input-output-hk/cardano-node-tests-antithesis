@@ -177,6 +177,38 @@ class TreasuryRecovery(unittest.TestCase):
             False, "treasury_withdrawal_recovered", {"checks": 5, "last_error": None}
         )
 
+    def test_leios_budget_reserves_query_time_and_still_reaches_exact_epoch_payout(self) -> None:
+        self.cluster.epoch_length = 15_000
+        self.cluster.slot_length = 0.2
+        self.tip.update(epoch=1, slot=27_000)
+        budget = recovery.queries.QueryBudget(1200)
+
+        def snapshot(*_args):
+            # Reserve a slow multi-query/retry attempt, in addition to sleeps.
+            budget.reserve(120)
+            paid = self.tip["epoch"] == 2
+            return self.tip.copy(), self.empty if paid else self.ratified, 30 if paid else 20
+
+        def advance(seconds):
+            self.tip["slot"] += round(seconds / self.cluster.slot_length)
+            self.tip["epoch"] = self.tip["slot"] // self.cluster.epoch_length
+
+        recovery.treasury.immutable_snapshot.side_effect = snapshot
+        recovery.time.sleep.side_effect = advance
+        recovery.treasury.gov_state.side_effect = lambda *_: (
+            self.empty if self.tip["epoch"] == 2 else self.ratified
+        )
+        with (
+            mock.patch.object(recovery.recovery, "leios_window", return_value=(3000, 1200)),
+            mock.patch.object(recovery.queries, "QueryBudget", return_value=budget),
+        ):
+            assert recovery.main() == 0
+        self.assertEqual(budget.remaining, 840)
+        self.sdk.always.assert_any_call(True, "treasury_withdrawal_recovered")
+        self.sdk.always.assert_any_call(
+            True, "treasury_withdrawal_payout_matches_ratification", mock.ANY
+        )
+
     def test_unpaid_ratified_action_still_fails_exact_accounting(self) -> None:
         self.claim["ratified_epoch"] = 1
         (self.root / "recv_1.json").write_text(json.dumps(self.claim))
@@ -191,6 +223,45 @@ class TreasuryRecovery(unittest.TestCase):
             False, "treasury_withdrawal_payout_matches_ratification", mock.ANY
         )
         self.sdk.always.assert_any_call(False, "treasury_withdrawal_recovered", mock.ANY)
+
+    def test_query_reservations_leave_the_full_wait_for_immutable_settlement(self) -> None:
+        self.cluster.epoch_length = 800
+        self.cluster.slot_length = 0.2
+        self.tip.update(epoch=1, slot=1467)
+        budget = recovery.queries.QueryBudget(120)
+        elapsed = 0
+        calls = 0
+
+        def gov_state(*_args):
+            nonlocal calls
+            budget.reserve(4.2)
+            calls += 1
+            if calls == 1:
+                raise OSError("paused query relay")
+            return self.empty if self.tip["epoch"] == 2 else self.ratified
+
+        def snapshot(*_args):
+            budget.reserve(4 * 4.2)
+            paid = self.tip["epoch"] == 2
+            return self.tip.copy(), self.empty if paid else self.ratified, 30 if paid else 20
+
+        def advance(seconds):
+            nonlocal elapsed
+            elapsed += seconds
+            self.tip["slot"] = 1467 + round(max(0, elapsed - 12) / 0.2)
+            self.tip["epoch"] = self.tip["slot"] // 800
+
+        recovery.treasury.gov_state.side_effect = gov_state
+        recovery.treasury.immutable_snapshot.side_effect = snapshot
+        recovery.time.sleep.side_effect = advance
+        with (
+            mock.patch.object(recovery.recovery, "leios_window", return_value=(160, 120)),
+            mock.patch.object(recovery.queries, "QueryBudget", return_value=budget),
+        ):
+            assert recovery.main() == 0
+        self.assertEqual(elapsed, 60)
+        self.assertGreater(budget.remaining, 0)
+        self.sdk.always.assert_any_call(True, "treasury_withdrawal_recovered")
 
 
 if __name__ == "__main__":
